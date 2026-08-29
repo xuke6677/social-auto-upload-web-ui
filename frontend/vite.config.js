@@ -22,96 +22,96 @@ export default defineConfig({
     open: true,
     proxy: {
       '/login': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/upload': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/uploadSave': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/getFiles': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/getFile': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/deleteFile': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/getAccounts': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/getValidAccounts': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/deleteAccount': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/postVideo': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/postVideoBatch': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/updateUserinfo': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/uploadCookie': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/downloadCookie': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/syncProfile': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/openCreatorCenter': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/checkAccount': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       // cookie 字符串导入账号（BasePlatform.import_cookie）
       '/importAccount': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
         timeout: 120000,
         proxyTimeout: 120000,
       },
       '/platforms': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
       '/api': {
-        target: 'http://localhost:5409',
+        target: 'http://localhost:5509',
         changeOrigin: true,
       },
     }
