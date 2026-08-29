@@ -1429,6 +1429,10 @@ class WeixinGzhPlatform(BasePlatform):
         """点击当前可见弹窗(weui-desktop-dialog)内的 primary 按钮(等其去掉 disabled)。
 
         定位: ``.weui-desktop-dialog:not([style*='display: none']) .weui-desktop-btn_primary``
+
+        返回 bool:是否真正点到。按钮必须 ①可见(尺寸>0) ②不被遮罩/其他弹窗
+        遮挡(elementFromPoint 命中按钮自身或其子元素) —— 纯 JS click 不做这两项
+        检查,曾点到被遮罩盖住的残留同名按钮导致"假成功"(发表弹窗实测,2026-08-28)。
         """
         deadline = asyncio.get_event_loop().time() + timeout_s
         while asyncio.get_event_loop().time() < deadline:
@@ -1442,10 +1446,18 @@ class WeixinGzhPlatform(BasePlatform):
                             'button.weui-desktop-btn_primary:not(.weui-desktop-btn_disabled)'
                         );
                         for (const b of btns) {
-                            if ((b.textContent || '').trim().indexOf(text) !== -1) {
-                                b.click();
-                                return true;
-                            }
+                            if ((b.textContent || '').trim().indexOf(text) === -1) continue;
+                            // 可见性:尺寸为 0 视为不可见
+                            const r = b.getBoundingClientRect();
+                            if (r.width === 0 || r.height === 0) continue;
+                            // 遮挡:中心点命中的必须是按钮自身(或其子元素),
+                            // 否则被遮罩/其他弹窗盖住,JS click 无效
+                            const el = document.elementFromPoint(
+                                r.x + r.width / 2, r.y + r.height / 2
+                            );
+                            if (el && el !== b && !b.contains(el)) continue;
+                            b.click();
+                            return true;
                         }
                     }
                     return false;
@@ -1453,9 +1465,10 @@ class WeixinGzhPlatform(BasePlatform):
                 button_text,
             )
             if clicked:
-                return
+                return True
             await asyncio.sleep(1)
         logger.warning("[阶段②] 「%s」按钮在 %ds 内未可点", button_text, timeout_s)
+        return False
 
     @staticmethod
     async def _publish_immediate(page):
@@ -1478,13 +1491,34 @@ class WeixinGzhPlatform(BasePlatform):
         await asyncio.sleep(2)
 
         # 2. 点弹窗底部「发表」(不开定时开关,直接发)
-        await WeixinGzhPlatform._click_dialog_primary(page, "发表", timeout_s=15)
+        #    优先 Playwright 真实点击(与 _publish_scheduled 一致,防 JS click 假成功)
+        try:
+            footer_btn = page.locator(
+                '.mass-send__footer button.weui-desktop-btn_primary:has-text("发表")'
+            ).first
+            await footer_btn.wait_for(state="visible", timeout=15000)
+            await footer_btn.click()
+            logger.info("[阶段②] 已点击弹窗「发表」(真实点击)")
+        except Exception as e:
+            logger.warning(
+                "[阶段②] mass-send footer「发表」真实点击失败(%s),回退 JS 点击", e
+            )
+            await WeixinGzhPlatform._click_dialog_primary(page, "发表", timeout_s=15)
         logger.info("[阶段②] 已点击弹窗「发表」,等待确认...")
 
-        # 3. 二次确认弹窗「继续发表」(若有)
+        # 3. 二次确认弹窗(按钮文案「继续发表」/「确认发表」/「发表」兜底)
         await asyncio.sleep(2)
-        await WeixinGzhPlatform._click_dialog_primary(page, "继续发表", timeout_s=15)
-        logger.info("[阶段②] 已点击「继续发表」,等待跳转首页...")
+        confirmed = await WeixinGzhPlatform._click_dialog_primary(
+            page, "继续发表", timeout_s=8
+        )
+        if not confirmed:
+            confirmed = await WeixinGzhPlatform._click_dialog_primary(
+                page, "发表", timeout_s=8
+            )
+        if confirmed:
+            logger.info("[阶段②] 已点击二次确认,等待跳转首页...")
+        else:
+            logger.info("[阶段②] 未检测到二次确认弹窗(可能无需确认),等待跳转...")
 
         # 4. 二次确认后公众号会弹扫码确认(管理员微信扫码),扫码通过后页面才跳转。
         #    这里只等页面跳转到首页/成功页,不点任何按钮 —— 扫码是用户线下动作。
@@ -1607,13 +1641,36 @@ class WeixinGzhPlatform(BasePlatform):
         await WeixinGzhPlatform._select_schedule_time(page, target_hour, target_minute)
 
         # 5. 点弹窗内「发表」(.mass-send__footer 内 primary)
-        await WeixinGzhPlatform._click_dialog_primary(page, "发表", timeout_s=15)
+        #    优先 Playwright 真实点击(actionability:可见/稳定/不被遮挡);
+        #    纯 JS click 曾"假成功"(点了被遮挡的残留按钮,用户需手动补点,2026-08-28 实测)
+        try:
+            footer_btn = page.locator(
+                '.mass-send__footer button.weui-desktop-btn_primary:has-text("发表")'
+            ).first
+            await footer_btn.wait_for(state="visible", timeout=15000)
+            await footer_btn.click()
+            logger.info("[阶段②] 已点击定时「发表」(真实点击)")
+        except Exception as e:
+            logger.warning(
+                "[阶段②] mass-send footer「发表」真实点击失败(%s),回退 JS 点击", e
+            )
+            await WeixinGzhPlatform._click_dialog_primary(page, "发表", timeout_s=15)
         logger.info("[阶段②] 已点击定时「发表」,等待确认...")
 
-        # 6. 二次确认「继续发表」(若有)
+        # 6. 二次确认(若有):按钮文案可能是「继续发表」/「确认发表」/「发表」,
+        #    先精确「继续发表」,超时退化为「发表」兜底(indexOf 可命中"确认发表")
         await asyncio.sleep(2)
-        await WeixinGzhPlatform._click_dialog_primary(page, "继续发表", timeout_s=15)
-        logger.info("[阶段②] 已点击「继续发表」,等待定时发布提交...")
+        confirmed = await WeixinGzhPlatform._click_dialog_primary(
+            page, "继续发表", timeout_s=8
+        )
+        if not confirmed:
+            confirmed = await WeixinGzhPlatform._click_dialog_primary(
+                page, "发表", timeout_s=8
+            )
+        if confirmed:
+            logger.info("[阶段②] 已点击二次确认,等待定时发布提交...")
+        else:
+            logger.info("[阶段②] 未检测到二次确认弹窗(可能无需确认),等待提交...")
         # 二次确认后公众号会弹扫码确认(管理员微信扫码),扫码通过后页面才跳转。
         # 这里只等页面跳转到首页/成功页,不点任何按钮 —— 扫码是用户线下动作。
         await WeixinGzhPlatform._wait_for_home(page, timeout_s=600)

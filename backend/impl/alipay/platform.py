@@ -1256,6 +1256,10 @@ class AlipayPlatform(BasePlatform):
                 logger.info("[上传视频] 开始添加话题 #%s", tag)
                 await textarea.click()
                 await asyncio.sleep(0.2)
+                # click 默认点元素几何中心,光标会落在描述文本中间,
+                # 导致话题插到描述中央 — 先把光标移到文本末尾
+                await page.keyboard.press("Control+End")
+                await asyncio.sleep(0.1)
                 # 先键盘输入 # 触发 mention 插件的联想下拉
                 await page.keyboard.type("#", delay=50)
                 await asyncio.sleep(0.3)
@@ -1267,12 +1271,19 @@ class AlipayPlatform(BasePlatform):
                 await asyncio.sleep(0.1)
                 await page.keyboard.press("Control+v")
                 logger.info("[上传视频] 已输入#并Ctrl+V粘贴 %s,等待联想下拉...", tag)
-                await asyncio.sleep(0.8)
-                # 检查下拉是否出现
+                # 轮询等下拉(最长 3s):联想接口+渲染耗时,固定 0.8s 经常等不到
                 suggestion_list = page.locator(
                     ".mentions-textarea__suggestions__list"
                 ).first
-                dropdown_visible = await suggestion_list.is_visible()
+                dropdown_visible = False
+                for _ in range(15):
+                    try:
+                        if await suggestion_list.is_visible():
+                            dropdown_visible = True
+                            break
+                    except Exception:
+                        pass
+                    await asyncio.sleep(0.2)
                 if dropdown_visible:
                     # 下拉出现了,尝试精确匹配官方话题
                     items = suggestion_list.locator(
