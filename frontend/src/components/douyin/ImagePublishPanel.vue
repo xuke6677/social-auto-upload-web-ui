@@ -70,6 +70,7 @@ import DouyinHotspotSelect from './HotspotSelect.vue'
 import DouyinTagSelect from './TagSelect.vue'
 import DouyinMixSelect from './MixSelect.vue'
 import { useAutoExtractHashtags } from '@/utils/hashtag'
+import { parseTagInput, appendTags } from '@/utils/tags'
 
 const props = defineProps({
   accountId: { type: [Number, Object], default: null },
@@ -143,17 +144,24 @@ const { form, hasAccountOverride, resetOverride, publicApi } = useChannelForm(
 // ===== Tag input =====
 const tagInput = ref('')
 
+// 抖音标签上限:官方活动 + 标签总数最多 5 个(读 platforms.js 的 maxTags)
+const DY_MAX_TAGS = PLATFORMS.DOUYIN.maxTags
+
+// 支持批量输入:按 # 或逗号(中英)拆分;活动数占用配额,超过上限截断并轻提示
 function addTag() {
-  const tag = tagInput.value.trim()
-  if (!tag) return
-  if ((form.activityId?.length || 0) + (form.tags?.length || 0) >= 5) {
-    ElMessage.warning('官方活动 + 标签最多 5 个')
-    return
-  }
+  const parsed = parseTagInput(tagInput.value)
+  if (parsed.length === 0) return
   if (!form.tags) form.tags = []
-  if (form.tags.includes(tag)) { ElMessage.warning('标签已存在'); return }
-  form.tags.push(tag)
-  tagInput.value = ''
+  const reserved = form.activityId?.length || 0
+  const { added, dups, overflowed } = appendTags(form.tags, parsed, { maxTags: DY_MAX_TAGS, reserved })
+  if (parsed.length === 1) {
+    // 单标签:保持原有交互(超限/重复直接拦截并提示)
+    if (overflowed) { ElMessage.warning('官方活动 + 标签最多 5 个'); return }
+    if (dups.length) { ElMessage.warning('标签已存在'); return }
+  } else if (overflowed > 0) {
+    ElMessage.warning(`官方活动 + 标签最多 ${DY_MAX_TAGS} 个，已保留前 ${Math.max(0, DY_MAX_TAGS - reserved)} 个标签`)
+  }
+  if (added.length > 0 || parsed.length > 1) tagInput.value = ''
 }
 
 function removeTag(index) { form.tags.splice(index, 1) }
@@ -163,7 +171,7 @@ useAutoExtractHashtags({
   form,
   descKey: 'description',
   tagKey: 'tags',
-  maxTags: 5,
+  maxTags: DY_MAX_TAGS,
   getReservedTagCount: () => (form.activityId?.length || 0),
 })
 

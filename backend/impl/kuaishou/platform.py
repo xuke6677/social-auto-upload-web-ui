@@ -416,15 +416,13 @@ class KuaishouPlatform(BasePlatform):
         logger.info("[发布图集] 开始快手图集发布流程")
         logger.info("=" * 60)
 
-        # 标签上限校验:快手最多 4 个
+        # 标签上限:快手最多 4 个,超过则静默截断(以传入的前 4 个为准,不中断发布)
         if len(tags) > _KS_MAX_TAGS:
-            logger.error(
-                "[发布校验] 快手标签超过上限: 当前 %d 个, 最多 %d 个",
-                len(tags), _KS_MAX_TAGS,
+            logger.info(
+                "[标签] 超过 %d 个，已截断: 原始 %d 个 -> %s",
+                _KS_MAX_TAGS, len(tags), tags[:_KS_MAX_TAGS],
             )
-            raise ValueError(
-                f"快手标签最多 {_KS_MAX_TAGS} 个, 当前 {len(tags)} 个"
-            )
+            tags = tags[:_KS_MAX_TAGS]
 
         # 打印所有接收到的参数
         logger.info("[发布参数] 接收到的所有参数:")
@@ -634,16 +632,14 @@ class KuaishouPlatform(BasePlatform):
         logger.info("[发布视频] 开始快手视频发布流程")
         logger.info("=" * 60)
 
-        # 标签上限校验:快手最多 4 个
+        # 标签上限:快手最多 4 个,超过则静默截断(以传入的前 4 个为准,不中断发布)
         tags = kwargs.get("tags", []) or []
         if len(tags) > _KS_MAX_TAGS:
-            logger.error(
-                "[发布校验] 快手标签超过上限: 当前 %d 个, 最多 %d 个",
-                len(tags), _KS_MAX_TAGS,
+            logger.info(
+                "[标签] 超过 %d 个，已截断: 原始 %d 个 -> %s",
+                _KS_MAX_TAGS, len(tags), tags[:_KS_MAX_TAGS],
             )
-            raise ValueError(
-                f"快手标签最多 {_KS_MAX_TAGS} 个, 当前 {len(tags)} 个"
-            )
+            tags = tags[:_KS_MAX_TAGS]
 
         # 打印所有接收到的参数
         logger.info("[发布参数] 接收到的所有参数:")
@@ -652,7 +648,7 @@ class KuaishouPlatform(BasePlatform):
 
         title = kwargs.get("title", "")
         files = kwargs.get("files", [])
-        tags = kwargs.get("tags", []) or []
+        # tags 已在上面完成截断,不再从 kwargs 重读(否则会覆盖截断结果)
         account_files = kwargs.get("account_file", [])
         enable_timer = kwargs.get("enableTimer", False)
         videos_per_day = kwargs.get("videos_per_day", 1)

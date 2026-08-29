@@ -133,6 +133,10 @@ async def _fetch_collections_via_browser(cookie_file: str) -> dict:
             except Exception as e:
                 logger.info(f"[合集列表] 页面加载(非致命): {e}")
 
+            # 登录态失效时 channels 会重定向到 login.html,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "视频号登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 2. 点击「选择合集」入口
             # DOM: div.display-text 里的「选择合集」文案
             # 需要等待页面加载完成(「选择合集」文案出现)再点击
@@ -293,6 +297,9 @@ async def _fetch_activities_via_browser(cookie_file: str, keyword: str) -> dict:
             except Exception as e:
                 logger.info(f"[活动搜索] 页面加载(非致命): {e}")
 
+            if "login" in page.url:
+                return {"success": False, "error": "视频号登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 2. 等待活动卡 div.post-activity-wrap 出现并点击展开
             logger.info("[活动搜索] 等待活动卡出现...")
             activity_wrap = page.locator("div.post-activity-wrap").first
@@ -400,6 +407,9 @@ async def _fetch_locations_via_browser(cookie_file: str, keyword: str) -> dict:
                 await asyncio.sleep(3)
             except Exception as e:
                 logger.info(f"[位置搜索] 页面加载(非致命): {e}")
+
+            if "login" in page.url:
+                return {"success": False, "error": "视频号登录态已过期,请先在「账号管理」重新登录该账号"}
 
             # 2. 等待位置卡 div.position-display-wrap 出现并点击展开
             logger.info("[位置搜索] 等待位置卡出现...")

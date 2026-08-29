@@ -135,6 +135,10 @@ async def _search_compilation_via_browser(cookie_file: str, keyword: str) -> dic
             await page.wait_for_load_state("domcontentloaded", timeout=15000)
             await asyncio.sleep(2)
 
+            # 登录态失效时头条会重定向到登录页(mp.toutiao.com/auth/login),直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "今日头条登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 2. 直接调用合集接口
             logger.info("[合集搜索] 调用合集接口...")
             api_url = "https://mp.toutiao.com/xigua/api/pSeries/simpleGetAlbumInfoByMediaId/?params=%7B%22Limit%22%3A0%2C%22Offset%22%3A0%2C%22SortType%22%3A1%7D"

@@ -57,6 +57,10 @@ async def _fetch_with_browser(cookie_file: str, url: str, base_url: str = "https
             await page.goto(base_url, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000)
 
+            # 登录态失效时抖音会重定向到登录页,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "抖音登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 使用fetch API请求目标URL
             escaped_url = url.replace("'", "\\'").replace('"', '\\"')
 
@@ -115,6 +119,10 @@ async def _fetch_with_browser_post(cookie_file: str, url: str, form_data: dict, 
             # 先打开基础URL，确保cookie生效
             await page.goto(base_url, wait_until="domcontentloaded")
             await page.wait_for_timeout(2000)
+
+            # 登录态失效时抖音会重定向到登录页,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "抖音登录态已过期,请先在「账号管理」重新登录该账号"}
 
             # 使用fetch API发送POST请求
             escaped_url = url.replace("'", "\\'").replace('"', '\\"')
@@ -325,6 +333,10 @@ async def _search_music_via_browser(cookie_file: str, keyword: str, cursor_val: 
             logger.info("打开图文发布页面...")
             await page.goto("https://creator.douyin.com/creator-micro/content/upload?default-tab=3", wait_until="domcontentloaded")
             await page.wait_for_timeout(3000)
+
+            # 登录态失效时抖音会重定向到登录页,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "抖音登录态已过期,请先在「账号管理」重新登录该账号"}
 
             # 2. 上传测试图片
             logger.info("上传测试图片...")

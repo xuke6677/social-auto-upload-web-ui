@@ -192,6 +192,10 @@ async def _fetch_collections_via_browser(cookie_file: str) -> dict:
             except Exception as e:
                 logger.info(f"[合集列表] 页面加载(非致命): {e}")
 
+            # 登录态失效时小红书会重定向到登录页,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "小红书登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 1.5 先上传一个测试视频 —— 合集入口要表单渲染后才出现。
             test_video = get_test_video()
             if not test_video:
@@ -363,6 +367,10 @@ async def _fetch_poi_via_browser(cookie_file: str, keyword: str) -> dict:
                 await asyncio.sleep(2)
             except Exception as e:
                 logger.info(f"[POI搜索] 页面加载(非致命): {e}")
+
+            # 登录态失效时小红书会重定向到登录页,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "小红书登录态已过期,请先在「账号管理」重新登录该账号"}
 
             # 1.5 先上传一个测试视频 —— 否则发布页停在「上传区」,
             # 「内容来源声明/自主拍摄」等控件不会渲染出来。

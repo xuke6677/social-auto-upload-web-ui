@@ -160,7 +160,8 @@ async def _fetch_collections_via_browser(cookie_file: str, collection_type: str 
                     break
                 await asyncio.sleep(0.5)
             if not token:
-                return {"success": False, "error": f"未能解析 token(cookie 可能失效), URL={page.url}"}
+                # 登录态失效时公众号首页不会跳转(始终停留在登录页,URL 无 token),直接给出明确报错
+                return {"success": False, "error": "微信公众号登录态已过期,请先在「账号管理」重新登录该账号"}
             logger.info(f"[合集列表] 获取到 token: {token}")
 
             # 2. 打开合集管理页

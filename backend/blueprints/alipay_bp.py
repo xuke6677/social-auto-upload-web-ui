@@ -52,16 +52,34 @@ def _get_cookie_path(cookie_file: str) -> str:
 
 
 def _get_account_cookie_file(account_id: str) -> str:
-    """从数据库取账号 cookie 文件名。account_id 为空时取任意一个支付宝账号。"""
+    """从数据库取账号 cookie 文件名。account_id 为空时取任意一个支付宝账号。
+
+    前端模板字符串会把 null/undefined 拼成 "null"/"undefined" 字符串,
+    这里统一视为未传,回退到任意一个支付宝账号(type=12)。
+    """
+    if account_id in (None, "", "null", "undefined", "None"):
+        account_id = None
     conn = sqlite3.connect(str(Path(BASE_DIR / "db" / "database.db")))
     cursor = conn.cursor()
     if account_id:
-        cursor.execute("SELECT filePath FROM user_info WHERE id = ?", (account_id,))
+        cursor.execute(
+            "SELECT filePath FROM user_info WHERE id = ? AND type = 12",
+            (account_id,),
+        )
     else:
         cursor.execute("SELECT filePath FROM user_info WHERE type = 12 LIMIT 1")
     row = cursor.fetchone()
     conn.close()
     return row[0] if row else None
+
+
+# 支付宝登录/鉴权页面的 URL 特征(登录态失效会跳转)
+_ALIPAY_LOGIN_URL_HINTS = ("login", "passport", "auth.alipay.com")
+
+
+def _is_login_redirect(url: str) -> bool:
+    """判断当前页面是否被重定向到了登录/鉴权页。"""
+    return any(hint in url for hint in _ALIPAY_LOGIN_URL_HINTS)
 
 
 # ======================================================================
@@ -172,10 +190,37 @@ async def _search_compilation_via_browser(cookie_file: str, keyword: str) -> dic
             await page.goto(_ALIPAY_PUBLISH_URL, timeout=60000)
             await page.wait_for_load_state("domcontentloaded", timeout=30000)
 
+            # 登录态失效会被重定向到登录页,提前给出明确报错
+            # (否则后续等上传入口只会报模糊的 wait_for 超时)
+            if _is_login_redirect(page.url):
+                logger.warning(f"[合集搜索] 登录态失效,已跳转: {page.url}")
+                return {
+                    "success": False,
+                    "error": "支付宝登录态已过期,请先在「账号管理」重新登录该账号",
+                }
+
             # 4. 上传空视频
+            # 轮询等上传入口(最长 30s),期间持续检测登录跳转 —
+            # 比一次性 wait_for(15s) 更耐慢速渲染,且报错更可定位
             logger.info("[合集搜索] 上传空视频触发表单渲染...")
             file_input = page.locator("input[type='file']").first
-            await file_input.wait_for(state="attached", timeout=15000)
+            attached = False
+            for _ in range(60):
+                if _is_login_redirect(page.url):
+                    logger.warning(f"[合集搜索] 登录态失效,已跳转: {page.url}")
+                    return {
+                        "success": False,
+                        "error": "支付宝登录态已过期,请先在「账号管理」重新登录该账号",
+                    }
+                if await file_input.count() > 0:
+                    attached = True
+                    break
+                await asyncio.sleep(0.5)
+            if not attached:
+                return {
+                    "success": False,
+                    "error": f"页面加载超时,未找到上传入口(当前页面: {page.url})",
+                }
             await file_input.set_input_files(str(empty_video))
 
             # 5. 等表单渲染(标题输入框出现 = 上传完成 + 表单可交互)
@@ -421,6 +466,14 @@ async def _fetch_music_list_via_browser(cookie_file: str) -> dict:
             logger.info("[音乐列表] 打开支付宝图集发布页...")
             await page.goto(_ALIPAY_SHORT_CONTENT_URL, timeout=60000)
             await page.wait_for_load_state("domcontentloaded", timeout=30000)
+
+            # 登录态失效会被重定向到登录页,提前给出明确报错
+            if _is_login_redirect(page.url):
+                logger.warning(f"[音乐列表] 登录态失效,已跳转: {page.url}")
+                return {
+                    "success": False,
+                    "error": "支付宝登录态已过期,请先在「账号管理」重新登录该账号",
+                }
 
             # 3. 等「添加音乐」按钮可见 —— 若 3s 内没出现,上传测试图触发表单
             add_music_btn = page.locator(

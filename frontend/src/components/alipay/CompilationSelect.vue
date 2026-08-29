@@ -135,7 +135,9 @@ async function handleSearch() {
     return
   }
 
-  if (!props.accountId) {
+  // 支付宝允许空 accountId:后端会回退用任意一个支付宝账号的 cookie
+  // (合集搜索仅需登录态;头条仍要求指定账号)
+  if (!props.accountId && props.platform !== 'alipay') {
     console.warn(`[${getPlatformName()}合集] 未选择账号,无法搜索`)
     return
   }

@@ -142,6 +142,10 @@ async def _fetch_collections_via_browser(cookie_file: str) -> dict:
             except Exception as e:
                 logger.info(f"[合集列表] 页面加载(非致命): {e}")
 
+            # 登录态失效时微博会重定向到登录页(passport.weibo.com / login.php),直接给出明确报错
+            if "login" in page.url or "passport.weibo.com" in page.url:
+                return {"success": False, "error": "微博登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 2. 上传测试视频触发表单渲染(复用微博 platform 的上传逻辑)
             test_video = get_test_video()
             if not test_video:

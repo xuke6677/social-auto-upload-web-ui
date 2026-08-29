@@ -71,6 +71,7 @@ import { imagePublishApi } from '@/api/imagePublish'
 import { PLATFORMS } from '@/config/platforms'
 import { useChannelForm } from '@/composables/useChannelForm'
 import { useAutoExtractHashtags } from '@/utils/hashtag'
+import { parseTagInput, appendTags } from '@/utils/tags'
 
 const props = defineProps({
   accountId: { type: [Number, Object], default: null },
@@ -128,13 +129,15 @@ const { form, hasAccountOverride, resetOverride, publicApi } = useChannelForm(
 
 const tagInput = ref('')
 
+// 支持批量输入:按 # 或逗号(中英)拆分,小红书不限标签数
 function addTag() {
-  const tag = tagInput.value.trim()
-  if (!tag) return
+  const parsed = parseTagInput(tagInput.value)
+  if (parsed.length === 0) return
   if (!form.tags) form.tags = []
-  if (form.tags.includes(tag)) { ElMessage.warning('标签已存在'); return }
-  form.tags.push(tag)
-  tagInput.value = ''
+  const { added, dups } = appendTags(form.tags, parsed)
+  // 单标签重复时保持原有提示;批量输入重复项静默跳过
+  if (parsed.length === 1 && dups.length) { ElMessage.warning('标签已存在'); return }
+  if (added.length > 0 || parsed.length > 1) tagInput.value = ''
 }
 
 function removeTag(index) { form.tags.splice(index, 1) }

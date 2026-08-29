@@ -65,7 +65,7 @@ export const PLATFORMS = {
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', aiContent: '', isOriginal: false, scheduleTime: '', videoFormat: '', enableTimer: false, xhsSourceType: '', xhsShootLocation: '', xhsShootDate: '', xhsRepostSource: '' },
+    defaultSettings: { title: '', description: '', aiContent: '', isOriginal: true, scheduleTime: '', videoFormat: '', enableTimer: false, xhsSourceType: '', xhsShootLocation: '', xhsShootDate: '', xhsRepostSource: '' },
   },
   CHANNELS: {
     id: 2,
@@ -99,7 +99,7 @@ export const PLATFORMS = {
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', channelsMarkTag: '无需标注', channelsShootDate: '', channelsShootRegion: [], channelsRepostSource: '', channelsActivityName: '', channelsActivityData: null, isOriginal: false, scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', channelsMarkTag: '无需标注', channelsShootDate: '', channelsShootRegion: [], channelsRepostSource: '', channelsActivityName: '', channelsActivityData: null, isOriginal: true, scheduleTime: '', videoFormat: '' },
   },
   DOUYIN: {
     id: 3,
@@ -112,6 +112,8 @@ export const PLATFORMS = {
     bgColor: 'rgba(244, 63, 94, 0.15)',
     cssClass: 'douyin',
     creatorUrl: 'https://creator.douyin.com/',
+    // 标签上限:官方活动 + 标签总数最多 5 个(标签输入处据此截断)
+    maxTags: 5,
     settingsFields: [
       { key: 'aiContent', label: '自主声明', type: 'select', required: true, placeholder: '请选择自主声明', options: [
         { label: '内容由AI生成', value: '内容由AI生成' },
@@ -124,7 +126,7 @@ export const PLATFORMS = {
       { key: 'isOriginal', label: '原创声明', type: 'radio', options: [{ label: '原创', value: true }, { label: '非原创', value: false }] },
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
     ],
-    defaultSettings: { title: '', description: '', tags: [], aiContent: '', isOriginal: false, scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', tags: [], aiContent: '无需添加自主声明', isOriginal: true, scheduleTime: '', videoFormat: '' },
   },
   KUAISHOU: {
     id: 4,
@@ -137,13 +139,15 @@ export const PLATFORMS = {
     bgColor: 'rgba(245, 158, 11, 0.15)',
     cssClass: 'kuaishou',
     creatorUrl: 'https://k.kuaishou.com/',
+    // 标签上限:快手平台最多 4 个标签(标签输入处据此截断)
+    maxTags: 4,
     settingsFields: [
       { key: 'aiContent', label: '作者声明', type: 'select', required: true, placeholder: '请选择作者声明', options: [{ label: '内容为AI生成', value: '内容为AI生成' }, { label: '演绎情节，仅供娱乐', value: '演绎情节，仅供娱乐' }, { label: '个人观点，仅供参考', value: '个人观点，仅供参考' }, { label: '素材来源于网络', value: '素材来源于网络' }, { label: DECLARATION_NONE, value: DECLARATION_NONE }] },
       { key: 'isOriginal', label: '原创声明', type: 'radio', options: [{ label: '原创', value: true }, { label: '非原创', value: false }] },
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', aiContent: false, isOriginal: false, scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', aiContent: DECLARATION_NONE, isOriginal: true, scheduleTime: '', videoFormat: '' },
   },
   BILIBILI: {
     id: 5,
@@ -203,7 +207,7 @@ export const PLATFORMS = {
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', zone: '', creationDeclaration: '', biliRepostSource: '', isOriginal: false, scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', zone: '', creationDeclaration: '', biliRepostSource: '', isOriginal: true, scheduleTime: '', videoFormat: '' },
   },
   BAIJIAHAO: {
     id: 6,
@@ -266,7 +270,7 @@ export const PLATFORMS = {
       },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', isOriginal: false, creationDeclaration: '', supplementaryDeclaration: '', scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', isOriginal: true, creationDeclaration: '', supplementaryDeclaration: '', scheduleTime: '', videoFormat: '' },
   },
   TIKTOK: {
     id: 7,
@@ -285,7 +289,7 @@ export const PLATFORMS = {
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', aiContent: false, isOriginal: false, scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', aiContent: false, isOriginal: true, scheduleTime: '', videoFormat: '' },
   },
   YOUTUBE: {
     id: 8,
@@ -444,7 +448,7 @@ export const PLATFORMS = {
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间' },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', authorStatement: '', reprintUrl: '', compilation: '', scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', authorStatement: '内容无需标注', reprintUrl: '', compilation: '', scheduleTime: '', videoFormat: '' },
   },
   TOUTIAO: {
     id: 13,
@@ -504,7 +508,7 @@ export const PLATFORMS = {
       },
       { key: 'videoFormat', label: '视频格式', type: 'radio', options: [{ label: '横版', value: 'landscape' }, { label: '竖版', value: 'portrait' }] },
     ],
-    defaultSettings: { title: '', description: '', creationDeclaration: [], enableGenerateImage: true, collection: '', extendLink: false, extendLinkUrl: '', scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', creationDeclaration: 'AI生成', enableGenerateImage: true, collection: '', extendLink: false, extendLinkUrl: '', scheduleTime: '', videoFormat: '' },
   },
   ZHIHU: {
     id: 14,
@@ -674,7 +678,7 @@ export const PLATFORMS = {
         ] },
       { key: 'scheduleTime', label: '定时发布', type: 'datetime', placeholder: '选择时间（最近7天，需大于当前1小时）' },
     ],
-    defaultSettings: { title: '', description: '', isOriginal: false, gzhClaimSource: '', gzhCollectionName: '', gzhCollectionData: null, scheduleTime: '', videoFormat: '' },
+    defaultSettings: { title: '', description: '', isOriginal: true, gzhClaimSource: '', gzhCollectionName: '', gzhCollectionData: null, scheduleTime: '', videoFormat: '' },
   },
   TAOBAO_GUANGHE: {
     id: 18,

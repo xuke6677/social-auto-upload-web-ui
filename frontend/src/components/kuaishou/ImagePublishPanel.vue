@@ -58,6 +58,7 @@ import { imagePublishApi } from '@/api/imagePublish'
 import { PLATFORMS } from '@/config/platforms'
 import { useChannelForm } from '@/composables/useChannelForm'
 import { useAutoExtractHashtags } from '@/utils/hashtag'
+import { parseTagInput, appendTags } from '@/utils/tags'
 import KuaishouMusicSelect from './MusicSelect.vue'
 
 const props = defineProps({
@@ -133,20 +134,23 @@ const { form, hasAccountOverride, resetOverride, publicApi } = useChannelForm(
 
 const tagInput = ref('')
 
-// 快手标签上限(快手平台最多添加 4 个标签)
-const KS_MAX_TAGS = 4
+// 快手标签上限(快手平台最多添加 4 个标签,读 platforms.js 的 maxTags)
+const KS_MAX_TAGS = PLATFORMS.KUAISHOU.maxTags
 
+// 支持批量输入:按 # 或逗号(中英)拆分,超过上限截断并轻提示
 function addTag() {
-  const tag = tagInput.value.trim()
-  if (!tag) return
+  const parsed = parseTagInput(tagInput.value)
+  if (parsed.length === 0) return
   if (!form.tags) form.tags = []
-  if (form.tags.includes(tag)) { ElMessage.warning('标签已存在'); return }
-  if (form.tags.length >= KS_MAX_TAGS) {
-    ElMessage.warning(`标签最多 ${KS_MAX_TAGS} 个`)
-    return
+  const { added, dups, overflowed } = appendTags(form.tags, parsed, { maxTags: KS_MAX_TAGS })
+  if (parsed.length === 1) {
+    // 单标签:保持原有交互(重复/超限直接拦截并提示)
+    if (dups.length) { ElMessage.warning('标签已存在'); return }
+    if (overflowed) { ElMessage.warning(`标签最多 ${KS_MAX_TAGS} 个`); return }
+  } else if (overflowed > 0) {
+    ElMessage.warning(`快手最多 ${KS_MAX_TAGS} 个标签，已保留前 ${KS_MAX_TAGS} 个`)
   }
-  form.tags.push(tag)
-  tagInput.value = ''
+  if (added.length > 0 || parsed.length > 1) tagInput.value = ''
 }
 
 function removeTag(index) { form.tags.splice(index, 1) }

@@ -44,7 +44,11 @@
               :key="r"
               :class="['ratio-tab', { active: activeTab === r }]"
               @click="switchTab(r)"
-            >{{ r }}</button>
+            >{{ r }}<span
+              v-if="coverForTab(r)?._auto"
+              class="ratio-tab-auto"
+              title="该尺寸当前是自动抽帧裁剪图，请确认构图"
+            >自动</span></button>
           </div>
         </div>
 
@@ -600,6 +604,21 @@ defineExpose({ open })
     background: $gradient-brand;
     color: #fff;
     box-shadow: 0 2px 8px rgba($brand-start, 0.35);
+  }
+}
+// 尺寸 tab 内的「自动」小标记：提示该尺寸当前是自动抽帧裁剪图
+.ratio-tab-auto {
+  margin-left: 4px;
+  padding: 1px 5px;
+  border-radius: 4px;
+  font-size: 10px;
+  font-weight: 600;
+  font-family: inherit;
+  color: $brand-start;
+  background: rgba($brand-start, 0.12);
+  .active & {
+    color: #fff;
+    background: rgba(255, 255, 255, 0.22);
   }
 }
 

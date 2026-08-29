@@ -142,6 +142,10 @@ async def _search_music_via_browser(cookie_file: str, keyword: str, count: str =
             )
             await asyncio.sleep(2)
 
+            # 登录态失效时快手会重定向到登录页,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "快手登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 2. 上传测试图
             logger.info("上传测试图...")
             # ?tabType=2 同时渲染视频/图片两个 tab 的上传按钮（隐藏 + 可见），

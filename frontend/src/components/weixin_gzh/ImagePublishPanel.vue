@@ -72,6 +72,7 @@ import { imagePublishApi } from '@/api/imagePublish'
 import { weixinGzhApi } from '@/api/weixin_gzh'
 import { useChannelForm } from '@/composables/useChannelForm'
 import { useAutoExtractHashtags } from '@/utils/hashtag'
+import { parseTagInput, appendTags } from '@/utils/tags'
 import RemoteSearchSelect from '@/components/common/RemoteSearchSelect.vue'
 
 const props = defineProps({
@@ -151,13 +152,13 @@ const { form, hasAccountOverride, resetOverride, publicApi } = useChannelForm(
 
 const tagInput = ref('')
 
+// 支持批量输入:按 # 或逗号(中英)拆分,重复话题静默跳过(保持原有交互)
 function addTag() {
-  const tag = tagInput.value.trim()
-  if (!tag) return
+  const parsed = parseTagInput(tagInput.value)
+  if (parsed.length === 0) return
   if (!form.tags) form.tags = []
-  if (form.tags.includes(tag)) return
-  form.tags.push(tag)
-  tagInput.value = ''
+  const { added } = appendTags(form.tags, parsed)
+  if (added.length > 0 || parsed.length > 1) tagInput.value = ''
 }
 
 function removeTag(index) { form.tags.splice(index, 1) }

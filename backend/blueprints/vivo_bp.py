@@ -157,6 +157,10 @@ async def _fetch_positions_via_browser(cookie_file: str, keyword: str) -> dict:
             except Exception as e:
                 logger.info(f"[位置搜索] 页面加载(非致命): {e}")
 
+            # 登录态失效时 VIVO 会重定向到登录页,直接给出明确报错
+            if "login" in page.url:
+                return {"success": False, "error": "VIVO登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 2. 上传测试视频触发表单渲染(位置入口要表单渲染后才出现)
             test_video = get_test_video()
             if not test_video:

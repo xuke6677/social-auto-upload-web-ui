@@ -159,6 +159,10 @@ async def _fetch_collections_via_browser(cookie_file: str) -> dict:
             except Exception as e:
                 logger.info(f"[合集列表] 页面加载(非致命): {e}")
 
+            # 登录态失效时 B 站会重定向到 passport.bilibili.com 登录页,直接给出明确报错
+            if "passport.bilibili.com" in page.url:
+                return {"success": False, "error": "B站登录态已过期,请先在「账号管理」重新登录该账号"}
+
             # 2. 上传测试视频触发页面跳转到发布表单(不等上传完成)
             # 完全复用 platform.py 的 _upload_video_file 同款逻辑
             test_video = get_test_video()

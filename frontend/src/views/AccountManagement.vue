@@ -483,8 +483,10 @@ import { ref, reactive, computed, watch, onMounted, onBeforeUnmount, nextTick, h
 import { Refresh, Loading, Link, Plus, Edit, Delete, Check, Folder, Key, CollectionTag, Close, Upload, SuccessFilled, CircleCheckFilled, CircleCloseFilled, Position, InfoFilled, Select, Search, Clock } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { accountApi } from '@/api/account'
+import { checkAccountsConcurrently } from '@/api/accountCheck'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
+import { useImagePublishStore } from '@/stores/imagePublish'
 import { http } from '@/utils/request'
 import { platformList, platformNameToId, platformNameToKey, platformCssMap, getPlatformByName } from '@/config/platforms'
 import { getDefaultAvatar, proxyAvatar } from '@/utils/avatar'
@@ -495,6 +497,7 @@ import BatchTagDialog from '@/components/BatchTagDialog.vue'
 
 const accountStore = useAccountStore()
 const appStore = useAppStore()
+const imagePublishStore = useImagePublishStore()
 
 /** 平台是否已被加入黑名单（account.platform 是中文名,需先转为 key） */
 const isAccountDisabled = (account) => {
@@ -540,7 +543,8 @@ watch(() => accountStore.accounts, () => {
 let tagResizeObserver = null
 
 onMounted(() => {
-  fetchAccountsQuick()
+  // 先快速拉账号列表渲染页面，再静默并发检查所有账号登录状态（不弹窗，只更新卡片状态徽标）
+  fetchAccountsQuick().then(() => runSilentAccountCheck())
   accountStore.loadTags()
   nextTick(() => {
     checkTagOverflow()
@@ -551,11 +555,58 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   tagResizeObserver?.disconnect()
+  // 组件卸载：使进行中的静默检查失效（停止取新任务、忽略落地结果）
+  silentCheckGen++
   if (importEventSource) {
     importEventSource.close()
     importEventSource = null
   }
 })
+
+// ── 静默批量检查登录状态（进入页面自动执行）────────────────
+// 与「批量检查」弹窗共用同一套并发池逻辑（@/api/accountCheck），
+// 区别仅在交互：这里不弹进度弹窗，结果直接更新卡片状态徽标（验证中 → 正常/异常）。
+const silentChecking = ref(false)
+// 代际标记：组件卸载或新一轮检查触发时 ++，使旧任务的后续结果失效
+let silentCheckGen = 0
+
+const runSilentAccountCheck = async () => {
+  // 防抖：上一轮静默检查未完成 / 批量检查弹窗进行中，跳过
+  if (silentChecking.value || appStore.isAccountRefreshing) return
+  // 登录 / 导入流程进行中：跳过，避免抢占后端线程
+  if (loginDialogVisible.value || importDialogVisible.value) return
+  // 图片发布进行中：跳过
+  if (imagePublishStore.publishing) return
+  // 跳过已拉黑的账号（无法检查）和正在单账号检查中的账号
+  const targets = accountStore.accounts.filter(a =>
+    !isAccountDisabled(a) && !checkingIds.value.has(a.id)
+  )
+  if (!targets.length) return
+
+  silentChecking.value = true
+  const gen = ++silentCheckGen
+  // 记录检查前状态，请求异常时回滚（避免网络抖动误判为失效）
+  const prevStatus = new Map(targets.map(a => [a.id, a.status]))
+
+  try {
+    await checkAccountsConcurrently(targets, {
+      concurrency: 2,
+      shouldAbort: () => gen !== silentCheckGen,
+      onAccountStart: (account) => {
+        accountStore.updateAccount(account.id, { status: '验证中' })
+      },
+      onAccountResult: (account, { valid, error }) => {
+        if (error) {
+          accountStore.updateAccount(account.id, { status: prevStatus.get(account.id) || '异常' })
+        } else {
+          accountStore.updateAccount(account.id, { status: valid ? '正常' : '异常' })
+        }
+      },
+    })
+  } finally {
+    if (gen === silentCheckGen) silentChecking.value = false
+  }
+}
 
 async function onTagChanged() {
   await fetchAccountsQuick()

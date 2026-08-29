@@ -387,7 +387,8 @@ class DouyinPlatform(BasePlatform):
         - ``productLink`` (*str*, optional)
         - ``productTitle`` (*str*, optional)
         - ``desc`` (*str*, optional) -- 描述里的 ``#xxx`` 会计入话题总数,
-          与 ``tags``、官方活动 ``activities`` 合并上限 5 个,超过将被前置校验拦截。
+          与 ``tags``、官方活动 ``activities`` 合并上限 5 个,
+          超过时按「描述内嵌话题 > tags 前 N 个 > activities」静默截断,不中断发布。
         - ``schedule_time_str`` (*str*, optional)
         - ``ai_content`` (*str*, optional)
         """
@@ -405,12 +406,9 @@ class DouyinPlatform(BasePlatform):
         tags = kwargs.get("tags", []) or []
         activities = kwargs.get("activities", []) or []
 
-        # ===== 前置校验:话题总数 ≤ 5(描述里的 #xxx + 标签 + 官方活动) =====
+        # ===== 话题总数静默截断 ≤ 5(描述内嵌 #话题 > 标签前 N 个 > 官方活动) =====
         desc = kwargs.get("desc", "") or ""
-        ok, err = self._validate_publish_params(desc, tags, activities)
-        if not ok:
-            logger.error("[发布视频] 抖音前置校验失败: %s", err)
-            raise ValueError(err)
+        tags, activities = self._truncate_topics(desc, tags, activities)
 
         account_file = kwargs.get("account_file", [])
         enableTimer = kwargs.get("enableTimer", False)
@@ -768,6 +766,42 @@ class DouyinPlatform(BasePlatform):
                 f" + 官方活动 {len(activities)}),请删减"
             )
         return True, ""
+
+    # 抖音一条内容最多 5 个话题(描述 #xxx + 标签 + 官方活动合并计数)
+    _MAX_TOPICS = 5
+
+    @classmethod
+    def _truncate_topics(
+        cls, desc: str, tags: list, activities: list
+    ) -> tuple[list, list]:
+        """把话题总数静默截断到 ``_MAX_TOPICS`` 个以内,不中断发布。
+
+        保留优先级:描述内嵌 ``#话题`` > ``tags`` 前 N 个 > ``activities``。
+        描述本身的话题不删改;若描述内嵌话题已 ≥ 上限,tags/activities 全部丢弃。
+        返回 (截断后 tags, 截断后 activities)。
+        """
+        desc = desc or ""
+        tags = list(tags or [])
+        activities = list(activities or [])
+        desc_count = cls._count_hashtags(desc)
+        budget = max(cls._MAX_TOPICS - desc_count, 0)
+        orig_tag_count, orig_act_count = len(tags), len(activities)
+        new_tags = tags[:budget]
+        new_activities = activities[: max(budget - len(new_tags), 0)]
+        if len(new_tags) != orig_tag_count or len(new_activities) != orig_act_count:
+            logger.warning(
+                "[话题截断] 话题总数超限(描述 #xxx %d + 标签 %d + 官方活动 %d > %d),"
+                "已按优先级静默截断: 标签 %d→%d 个, 官方活动 %d→%d 个"
+                "(描述内嵌话题优先保留,发布不中断)",
+                desc_count, orig_tag_count, orig_act_count, cls._MAX_TOPICS,
+                orig_tag_count, len(new_tags), orig_act_count, len(new_activities),
+            )
+        if desc_count > cls._MAX_TOPICS:
+            logger.warning(
+                "[话题截断] 描述内嵌话题已达 %d 个(> %d),超出上限部分依赖平台侧处理",
+                desc_count, cls._MAX_TOPICS,
+            )
+        return new_tags, new_activities
 
     # ------------------------------------------------------------------
     # Helper: fill title, description, tags
@@ -1142,6 +1176,9 @@ class DouyinPlatform(BasePlatform):
         ai_content = kwargs.get("ai_content", "")
         activities = kwargs.get("activities", []) or []
         dry_run = kwargs.get("dry_run", True)  # Default to dry run for safety
+
+        # ===== 话题总数静默截断 ≤ 5(与视频发布一致:描述内嵌 #话题 > 标签前 N 个 > 官方活动) =====
+        tags, activities = self._truncate_topics(desc, tags, activities)
 
         # 打印发布参数摘要
         logger.info("[发布参数] 标题: %s", title)

@@ -183,7 +183,7 @@
             :style="{ borderColor: currentPlatformConfig.color + '26', background: currentPlatformConfig.color + '0a' }"
           >
             <div class="setting-label" :style="{ color: currentPlatformConfig.color }">标签</div>
-            <div class="setting-hint">{{ selectedPlatform === 'douyin' ? '官方活动 + 标签最多 5 个，按回车确认' : selectedPlatform === 'kuaishou' ? '输入标签内容，按回车确认（最多 4 个）' : '输入标签内容，按回车确认' }}</div>
+            <div class="setting-hint">{{ selectedPlatform === 'douyin' ? '官方活动 + 标签最多 5 个，按回车确认' : selectedPlatform === 'kuaishou' ? '输入标签内容，按回车确认（最多 4 个）' : '输入标签内容，按回车确认' }}，支持 # 或逗号批量输入</div>
               <el-input
                 v-model="tagInput"
                 placeholder="输入标签内容，按回车添加"
@@ -928,6 +928,7 @@ import { getFileUrl } from '@/utils/storage'
 import { http } from '@/utils/request'
 import { accountApi } from '@/api/account'
 import { platformList, getPlatformByKey, platformKeyToId, platformNameToKey } from '@/config/platforms'
+import { parseTagInput, appendTags } from '@/utils/tags'
 import { validateVideoForPlatform, validateTitleForPlatform, validateDescForPlatform, countCharsWithEmoji } from '@/config/videoLimits'
 
 import AccountSidebar from '@/components/AccountSidebar.vue'
@@ -1291,16 +1292,34 @@ const editorSource = computed(() => {
   }
 })
 
-// 确定性写回：直接按 orientation + ratio 映射到具体字段
+// 同方向「主/次尺寸」互为兄弟比例：横版 4:3↔16:9，竖版 3:4↔9:16。
+// 平台发布策略普遍「优先次尺寸，回退主尺寸」（如头条竖版先取 9:16），
+// 若兄弟比例残留自动抽帧裁剪图（_auto），会静默盖住用户手动设置的主尺寸封面。
+const COVER_SIBLING_FIELD = {
+  coverLandscape: 'coverLandscape169',
+  coverLandscape169: 'coverLandscape',
+  coverPortrait: 'coverPortrait916',
+  coverPortrait916: 'coverPortrait',
+}
+
+// 确定性写回：直接按 orientation + ratio 映射到具体字段。
+// 手动保存某比例后，清掉兄弟比例残留的自动封面（_auto），让平台回退到用户
+// 手动设置的封面；兄弟比例是用户手动设置的（无 _auto 标记）则不受影响。
 function onCoverSaved({ orientation, ratio, cover }) {
   const t = currentEditTarget.value
+  if (cover && cover._auto) delete cover._auto  // 编辑器保存的结果视为手动封面
+  let field = null
   if (orientation === 'landscape') {
-    if (ratio === '4:3') t.coverLandscape = cover
-    else if (ratio === '16:9') t.coverLandscape169 = cover
+    if (ratio === '4:3') field = 'coverLandscape'
+    else if (ratio === '16:9') field = 'coverLandscape169'
   } else {
-    if (ratio === '3:4') t.coverPortrait = cover
-    else if (ratio === '9:16') t.coverPortrait916 = cover
+    if (ratio === '3:4') field = 'coverPortrait'
+    else if (ratio === '9:16') field = 'coverPortrait916'
   }
+  if (!field) return
+  t[field] = cover
+  const sibling = COVER_SIBLING_FIELD[field]
+  if (cover && t[sibling]?._auto) t[sibling] = null
 }
 
 // Cover editor
@@ -1324,25 +1343,25 @@ const landscapeCoverFrames = computed(() =>
 // 平台表单默认值（常量）。platformConfigs 是「当前视频」的活状态，
 // 切换视频时按默认值 + 快照重建（applyVideoSnapshot）。
 const DEFAULT_PLATFORM_CONFIGS = {
-  douyin: { title: '', description: '', tags: [], aiContent: '', isOriginal: false, scheduleTime: '', activityId: [], hotspotId: '', hotspotData: null, selectedTag: null, tagType: '', tagValue: '', mixId: '', mixData: null },
-  xiaohongshu: { title: '', description: '', aiContent: '', isOriginal: false, scheduleTime: '', tags: [], collectionId: '', collectionName: '', collectionData: null },
-  kuaishou: { title: '', description: '', aiContent: '', isOriginal: false, scheduleTime: '', tags: [] },
-  bilibili: { title: '', description: '', zone: '', tags: [], creationDeclaration: '', biliRepostSource: '', biliKeepSystemTags: true, isOriginal: false, scheduleTime: '', biliCollectionName: '', biliCollectionData: null },
-  channels: { title: '', description: '', isOriginal: false, scheduleTime: '', tags: [], channelsCollectionName: '', channelsCollectionData: null, channelsLocationName: '', channelsLocationData: null, channelsActivityName: '', channelsActivityData: null, channelsMarkTag: '无需标注', channelsShootDate: '', channelsShootRegion: [], channelsRepostSource: '', channelsDrama: [], channelsLinkType: '', channelsLinkArticleUrl: '', channelsRedEnvelopeUrl: '' },
-  baijiahao: { title: '', description: '', isOriginal: false, scheduleTime: '', tags: [] },
-  tiktok: { title: '', description: '', aiContent: false, isOriginal: false, scheduleTime: '', tags: [] },
+  douyin: { title: '', description: '', tags: [], aiContent: '无需添加自主声明', isOriginal: true, scheduleTime: '', activityId: [], hotspotId: '', hotspotData: null, selectedTag: null, tagType: '', tagValue: '', mixId: '', mixData: null },
+  xiaohongshu: { title: '', description: '', aiContent: '', isOriginal: true, scheduleTime: '', tags: [], collectionId: '', collectionName: '', collectionData: null },
+  kuaishou: { title: '', description: '', aiContent: '内容无需添加声明', isOriginal: true, scheduleTime: '', tags: [] },
+  bilibili: { title: '', description: '', zone: '', tags: [], creationDeclaration: '', biliRepostSource: '', biliKeepSystemTags: true, isOriginal: true, scheduleTime: '', biliCollectionName: '', biliCollectionData: null },
+  channels: { title: '', description: '', isOriginal: true, scheduleTime: '', tags: [], channelsCollectionName: '', channelsCollectionData: null, channelsLocationName: '', channelsLocationData: null, channelsActivityName: '', channelsActivityData: null, channelsMarkTag: '无需标注', channelsShootDate: '', channelsShootRegion: [], channelsRepostSource: '', channelsDrama: [], channelsLinkType: '', channelsLinkArticleUrl: '', channelsRedEnvelopeUrl: '' },
+  baijiahao: { title: '', description: '', isOriginal: true, scheduleTime: '', tags: [] },
+  tiktok: { title: '', description: '', aiContent: false, isOriginal: true, scheduleTime: '', tags: [] },
   youtube: { title: '', description: '', audience: 'not_kids', alteredContent: false, scheduleTime: '', tags: [] },
   iqiyi: { title: '', description: '', creationDeclaration: '', riskWarning: '', enableCashActivity: false, scheduleTime: '', tags: [] },
   tencent_video: { title: '', description: '', creationDeclaration: [], scheduleTime: '', tags: [] },
   weibo: { title: '', description: '', videoType: '', weiboCategory: [], contentStatement: '', contentStatement2: '', contentStatement2Optional: '', tags: [], weiboCollectionName: '', weiboCollectionData: null },
-  alipay: { title: '', description: '', authorStatement: '', reprintUrl: '', compilation: '', scheduleTime: '', tags: [] },
-  toutiao: { title: '', description: '', creationDeclaration: [], enableGenerateImage: true, collection: '', extendLink: false, extendLinkUrl: '', scheduleTime: '', tags: [] },
+  alipay: { title: '', description: '', authorStatement: '内容无需标注', reprintUrl: '', compilation: '', scheduleTime: '', tags: [] },
+  toutiao: { title: '', description: '', creationDeclaration: 'AI生成', enableGenerateImage: true, collection: '', extendLink: false, extendLinkUrl: '', scheduleTime: '', tags: [] },
   zhihu: { title: '', description: '', creationDeclaration: '内容无需标注', category: '', scheduleTime: '', tags: [] },
   csdn: { title: '', description: '', recommend: false, scheduleTime: '', tags: [] },
   vivo: { title: '', description: '', vivoLocationName: '', vivoLocationData: null,
     vivoDistribution: false, vivoDeclaration: '', vivoPrivacy: '公开',
     vivoDownloadPermission: '允许', scheduleTime: '', tags: [] },
-  weixin_gzh: { title: '', description: '', isOriginal: false, gzhClaimSource: '', gzhCollectionName: '', gzhCollectionData: null, scheduleTime: '', tags: [] },
+  weixin_gzh: { title: '', description: '', isOriginal: true, gzhClaimSource: '', gzhCollectionName: '', gzhCollectionData: null, scheduleTime: '', tags: [] },
   taobao_guanghe: { title: '', description: '', guangheClaim: '', guangheLinkType: '', guangheProducts: [], guangheShops: [], scheduleTime: '', tags: [] },
   jingmai: { title: '', description: '', jdRelatedType: '', jdProducts: [], jdNovel: '', jdNovelData: null, jdDeclaration: '', scheduleTime: '', tags: [] },
 }
@@ -1756,31 +1775,27 @@ const { hasChanges, startAutoSaveTimer } = useAutoSave(() => saveDraft())
 // ========== Tag Input ==========
 const tagInput = ref('')
 
+// 支持批量输入:按 # 或逗号(中英)拆分;按平台 maxTags 截断,超限丢弃并轻提示
 function addTag() {
-  const tag = tagInput.value.trim()
-  if (!tag) return
+  const parsed = parseTagInput(tagInput.value)
+  if (parsed.length === 0) return
   if (!form.tags) form.tags = []
-  if (form.tags.includes(tag)) {
-    ElMessage.warning('标签已存在')
-    return
-  }
-  if (selectedPlatform.value === 'douyin') {
-    const ac = form.activityId?.length || 0
-    const tc = form.tags?.length || 0
-    if (ac + tc >= 5) {
-      ElMessage.warning('官方活动 + 标签最多 5 个')
+  const platform = getPlatformByKey(selectedPlatform.value)
+  const maxTags = platform?.maxTags
+  // 抖音:官方活动数也占用配额
+  const reserved = selectedPlatform.value === 'douyin' ? (form.activityId?.length || 0) : 0
+  const { added, dups, overflowed } = appendTags(form.tags, parsed, { maxTags, reserved })
+  if (parsed.length === 1) {
+    // 单标签:保持原有交互(重复/超限直接拦截并提示)
+    if (dups.length) { ElMessage.warning('标签已存在'); return }
+    if (overflowed) {
+      ElMessage.warning(selectedPlatform.value === 'douyin' ? '官方活动 + 标签最多 5 个' : `${platform?.name || ''}标签最多 ${maxTags} 个`)
       return
     }
+  } else if (overflowed > 0) {
+    ElMessage.warning(`${platform?.name || ''}最多 ${maxTags} 个标签，已保留前 ${Math.max(0, maxTags - reserved)} 个`)
   }
-  if (selectedPlatform.value === 'kuaishou') {
-    const tc = form.tags?.length || 0
-    if (tc >= 4) {
-      ElMessage.warning('快手标签最多 4 个')
-      return
-    }
-  }
-  form.tags.push(tag)
-  tagInput.value = ''
+  if (added.length > 0 || parsed.length > 1) tagInput.value = ''
 }
 
 function removeTag(index) {
@@ -1794,8 +1809,8 @@ useAutoExtractHashtags({
   form,
   descKey: 'description',
   tagKey: 'tags',
-  // 抖音活动+标签总数 ≤ 5;快手标签 ≤ 4;其他平台不限
-  maxTags: selectedPlatform.value === 'douyin' ? 5 : (selectedPlatform.value === 'kuaishou' ? 4 : undefined),
+  // 抖音活动+标签总数 ≤ 5;快手标签 ≤ 4;其他平台不限(与 addTag 共用 platforms.js 的 maxTags)
+  maxTags: getPlatformByKey(selectedPlatform.value)?.maxTags,
   // 抖音:活动数也算占用,需要预留位置;其他平台不预留
   getReservedTagCount: () => (selectedPlatform.value === 'douyin' ? (form.activityId?.length || 0) : 0),
 })
@@ -2186,7 +2201,7 @@ const addVideosDialogVisible = ref(false)
 function _slimMaterial(m) {
   return m ? {
     id: m.id, name: m.name, stored_path: m.stored_path, url: m.url,
-    size: m.size, type: m.type, _fromFrame: m._fromFrame,
+    size: m.size, type: m.type, _fromFrame: m._fromFrame, _auto: m._auto,
     duration: m.duration, orientation: m.orientation,
   } : null
 }
@@ -2496,10 +2511,12 @@ async function fetchAutoCovers(materialId, onStage) {
     })
     const d = resp?.data
     if (!d?.landscape_43) return null
-    // 后端按 4 个比例中心裁剪，前端分别填入对应字段（与手动裁剪结果同构）
+    // 后端按 4 个比例中心裁剪，前端分别填入对应字段（与手动裁剪结果同构）。
+    // _auto 标记：自动抽帧裁剪产物，用户手动设置封面时可据此清理残留自动图。
     const toCover = c => c ? {
       id: c.id, name: c.original_filename, url: getFileUrl(c.stored_path),
       stored_path: c.stored_path, size: c.file_size, type: c.mime_type,
+      _auto: true,
     } : null
     return {
       coverLandscape: toCover(d.landscape_43),

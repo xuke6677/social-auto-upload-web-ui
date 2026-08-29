@@ -118,6 +118,7 @@
 <script setup>
 import { ref, computed, watch } from 'vue'
 import { ElMessage } from 'element-plus'
+import { parseTagInput, appendTags } from '@/utils/tags'
 
 const MAX_TAGS = 10
 
@@ -164,18 +165,18 @@ function toggleKey(p) {
   checkedKeys.value = next
 }
 
+// 支持批量输入:按 # 或逗号(中英)拆分,超过 MAX_TAGS 截断并轻提示
 function addTag() {
-  const v = (tagInput.value || '').trim()
-  if (!v) return
-  if (formTags.value.length >= MAX_TAGS) {
-    ElMessage.warning(`最多 ${MAX_TAGS} 个标签`)
-    return
+  const parsed = parseTagInput(tagInput.value)
+  if (parsed.length === 0) return
+  const { added, dups, overflowed } = appendTags(formTags.value, parsed, { maxTags: MAX_TAGS })
+  if (parsed.length === 1) {
+    // 单标签:保持原有交互(超限拦截提示;重复静默清空输入框)
+    if (overflowed) { ElMessage.warning(`最多 ${MAX_TAGS} 个标签`); return }
+    if (dups.length) { tagInput.value = ''; return }
+  } else if (overflowed > 0) {
+    ElMessage.warning(`最多 ${MAX_TAGS} 个标签，已保留前 ${MAX_TAGS} 个`)
   }
-  if (formTags.value.includes(v)) {
-    tagInput.value = ''
-    return
-  }
-  formTags.value = [...formTags.value, v]
   tagInput.value = ''
 }
 

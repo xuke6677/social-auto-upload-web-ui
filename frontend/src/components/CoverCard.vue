@@ -22,6 +22,11 @@
       <!-- Has cover image -->
       <div v-if="modelValue" class="cover-preview-wrap">
         <img :src="modelValue.url" class="cover-preview" />
+        <span
+          v-if="modelValue._auto"
+          class="cover-auto-badge"
+          title="自动抽帧裁剪生成，建议检查构图（尤其带文字的封面）"
+        >自动</span>
         <div class="cover-preview-overlay">
           <button class="overlay-action" @click="$emit('edit')">
             <el-icon :size="16"><Edit /></el-icon>
@@ -190,6 +195,22 @@ defineEmits([
   max-width: 100%;
   object-fit: contain;
   border-radius: 4px;
+}
+
+// 「自动」角标：标记抽帧裁剪生成的封面，提醒用户检查构图
+.cover-auto-badge {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: rgba($brand-start, 0.85);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.25);
+  cursor: default;
+  z-index: 1;
 }
 
 .cover-preview-overlay {
