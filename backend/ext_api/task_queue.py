@@ -39,12 +39,14 @@ def _refresh_batch_status(conn, batch_id: str):
         """SELECT COUNT(*),
                   SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
                   SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
-                  SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END)
+                  SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END),
+                  SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END)
            FROM publish_details WHERE batch_id=?""",
         (batch_id,),
     ).fetchone()
-    total, succ, fail, in_flight = counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0
-    bs = aggregate_batch_status(succ=succ, fail=fail, in_flight=in_flight, total=total)
+    total, succ, fail, in_flight, cancelled = (
+        counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0, counts[4] or 0)
+    bs = aggregate_batch_status(succ=succ, fail=fail, in_flight=in_flight, total=total, cancelled=cancelled)
     now = datetime.now().isoformat()
     conn.execute(
         """UPDATE publish_batches
@@ -142,21 +144,27 @@ class TaskStatus(str, Enum):
     CANCELLED = "cancelled"
 
 
-def aggregate_batch_status(*, succ: int, fail: int, in_flight: int, total: int) -> str:
+def aggregate_batch_status(*, succ: int, fail: int, in_flight: int, total: int, cancelled: int = 0) -> str:
     """根据 detail 状态聚合 batch 状态。
 
     优先级：
-      1. total == 0            -> 'pending'    （无 detail，理论不该发生）
-      2. in_flight > 0         -> 'running'    （仍有 queued/running detail 未结束）
-      3. fail == 0             -> 'success'    （全部成功）
-      4. succ == 0             -> 'failed'     （全部失败）
-      5. 其余                  -> 'partial'    （混合成功+失败）
+      1. total == 0              -> 'pending'    （无 detail，理论不该发生）
+      2. in_flight > 0           -> 'running'    （仍有 queued/running detail 未结束）
+      3. cancelled == total      -> 'cancelled'  （全部被取消）
+      4. fail+cancelled == 0     -> 'success'    （全部成功）
+      5. succ == 0               -> 'failed'     （无成功：全失败或失败+取消混合）
+      6. 其余                    -> 'partial'    （部分失败：有成功但也有失败/取消）
+
+    注意：cancelled 必须计入非成功方。修复前 cancelled 不参与计数，
+    「1 成功 + N 取消」会因 fail==0 误判为「全部成功」。
     """
     if total == 0:
         return 'pending'
     if in_flight > 0:
         return 'running'
-    if fail == 0:
+    if cancelled >= total:
+        return 'cancelled'
+    if fail == 0 and cancelled == 0:
         return 'success'
     if succ == 0:
         return 'failed'
@@ -630,12 +638,14 @@ class TaskQueue:
                     """SELECT COUNT(*),
                               SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
                               SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
-                              SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END)
+                              SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END),
+                              SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END)
                        FROM publish_details WHERE batch_id=?""",
                     (batch_id,)
                 ).fetchone()
-                total, succ, fail, in_flight = counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0
-                bs = aggregate_batch_status(succ=succ, fail=fail, in_flight=in_flight, total=total)
+                total, succ, fail, in_flight, cancelled = (
+                    counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0, counts[4] or 0)
+                bs = aggregate_batch_status(succ=succ, fail=fail, in_flight=in_flight, total=total, cancelled=cancelled)
                 now = datetime.now().isoformat()
                 conn.execute(
                     """UPDATE publish_batches

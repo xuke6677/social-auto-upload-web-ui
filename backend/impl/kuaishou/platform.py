@@ -666,6 +666,8 @@ class KuaishouPlatform(BasePlatform):
         # （参见 services/draft_merge.py DECLARATION_PLATFORMS['kuaishou']='aiContent'）
         # author_declaration 仅作别名兼容旧调用
         author_declaration = kwargs.get("ai_content", "") or kwargs.get("author_declaration", "")
+        # 合集名称(账号级,空=不加入合集)。app.py/draft_merge 透传键为 kuaishou_collection_name
+        collection_name = kwargs.get("kuaishou_collection_name", "") or kwargs.get("collection_name", "")
 
         # 固定使用 4:3 横版封面（用户要求），竖版/通用仅作缺失兜底
         cover_path = thumbnail_landscape_path or thumbnail_portrait_path or thumbnail_path
@@ -679,6 +681,7 @@ class KuaishouPlatform(BasePlatform):
         logger.info("[发布参数] 定时发布: %s", enable_timer)
         logger.info("[发布参数] 封面: %s", cover_path or "无")
         logger.info("[发布参数] 作者声明: %s", author_declaration or "无")
+        logger.info("[发布参数] 合集: %s", collection_name or "无")
 
         publish_dates = parse_schedule_time(
             schedule_time_str, len(files), enable_timer,
@@ -715,6 +718,7 @@ class KuaishouPlatform(BasePlatform):
                         publish_date=pub_date,
                         enable_timer=enable_timer,
                         video_format=video_format,
+                        collection_name=collection_name,
                     )
 
         logger.info("=" * 60)
@@ -737,6 +741,7 @@ class KuaishouPlatform(BasePlatform):
         publish_date,
         enable_timer: bool,
         video_format: str = "landscape",
+        collection_name: str = "",
     ):
         browser = await self.create_browser(headless=False)
         upload_success = False
@@ -825,6 +830,11 @@ class KuaishouPlatform(BasePlatform):
                 await self._set_author_declaration(page, author_declaration)
             elif author_declaration == _DECLARATION_NONE:
                 logger.info("[作者声明] 选择「内容无需添加声明」，跳过设置")
+
+            # ------ Set collection(合集,空=不加入合集) ------
+            if collection_name:
+                logger.info("[合集] 开始设置合集: %s", collection_name)
+                await self._set_collection(page, collection_name)
 
             # ------ Set schedule time ------
             if enable_timer and publish_date and publish_date != 0:
@@ -1203,6 +1213,45 @@ class KuaishouPlatform(BasePlatform):
     # ------------------------------------------------------------------
     # Helper: set author declaration (ant-select dropdown)
     # ------------------------------------------------------------------
+
+    @staticmethod
+    async def _set_collection(page, collection_name: str):
+        """选择合集（antd Select，与合集列表接口 kuaishou_bp 同一套 DOM）。
+
+        - 入口: .ant-select:has(span.ant-select-selection-placeholder:has-text('合集'))
+          .ant-select-selector（placeholder 上层有 search input 遮挡，需 force 点击）
+        - 下拉项: .ant-select-dropdown .ant-select-item-option，
+          inner_text 第一行是合集名（第二行是「共N个作品」）
+        - 找不到入口或同名合集时只告警、不中断发布
+        """
+        try:
+            sel = page.locator(
+                ".ant-select:has(span.ant-select-selection-placeholder:has-text('合集')) "
+                ".ant-select-selector"
+            ).first
+            if await sel.count() == 0:
+                logger.warning("[合集] 未找到「选择合集」下拉,跳过")
+                return
+            await sel.click(force=True, timeout=8000)
+            await asyncio.sleep(1.5)
+
+            options = page.locator(".ant-select-dropdown .ant-select-item-option")
+            for _ in range(20):
+                if await options.count() > 0:
+                    break
+                await asyncio.sleep(0.5)
+
+            count = await options.count()
+            for i in range(count):
+                text = (await options.nth(i).inner_text()).strip()
+                if text.split("\n")[0].strip() == collection_name:
+                    await options.nth(i).click()
+                    logger.info("[合集] 已选择合集: %s", collection_name)
+                    return
+            logger.warning("[合集] 未找到同名合集: %s(共 %d 个候选),跳过", collection_name, count)
+            await page.keyboard.press("Escape")
+        except Exception as e:
+            logger.warning("[合集] 设置合集失败(跳过): %s", e)
 
     @staticmethod
     async def _set_author_declaration(page, author_declaration: str):

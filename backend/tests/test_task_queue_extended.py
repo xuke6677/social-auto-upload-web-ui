@@ -405,6 +405,24 @@ def test_aggregate_batch_status_mixed_partial():
     assert aggregate_batch_status(succ=2, fail=1, in_flight=0, total=3) == 'partial'
 
 
+def test_aggregate_batch_status_success_plus_cancelled_is_partial():
+    """回归测试：1 success + 4 cancelled → partial（不是 success）。
+
+    修复前 cancelled 不参与计数，fail==0 会误判「全部成功」。
+    """
+    assert aggregate_batch_status(succ=1, fail=0, in_flight=0, total=5, cancelled=4) == 'partial'
+
+
+def test_aggregate_batch_status_all_cancelled_is_cancelled():
+    """全部取消 → cancelled。"""
+    assert aggregate_batch_status(succ=0, fail=0, in_flight=0, total=3, cancelled=3) == 'cancelled'
+
+
+def test_aggregate_batch_status_failed_plus_cancelled_is_failed():
+    """无成功（失败+取消混合）→ failed。"""
+    assert aggregate_batch_status(succ=0, fail=2, in_flight=0, total=3, cancelled=1) == 'failed'
+
+
 def test_aggregate_batch_status_in_flight_with_only_success_returns_running():
     """回归测试：3 success + 0 failed + 2 in-flight → 必须是 running（不是 success）。
 

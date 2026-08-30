@@ -51,19 +51,18 @@ def _update_image_publish_detail(detail_id, status, error_message=""):
             counts = conn.execute(
                 """SELECT COUNT(*),
                           SUM(CASE WHEN status='success' THEN 1 ELSE 0 END),
-                          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END)
+                          SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END),
+                          SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END),
+                          SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END)
                    FROM publish_details WHERE batch_id=?""",
                 (batch_id,)
             ).fetchone()
-            total, succ, fail = counts[0], counts[1] or 0, counts[2] or 0
-            if total == 0:
-                bs = 'pending'
-            elif fail == 0:
-                bs = 'success'
-            elif succ == 0:
-                bs = 'failed'
-            else:
-                bs = 'partial'
+            total, succ, fail, in_flight, cancelled = (
+                counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0, counts[4] or 0)
+            # 与 ext_api.task_queue 同一套聚合规则（cancelled 计入非成功方）
+            from ext_api.task_queue import aggregate_batch_status
+            bs = aggregate_batch_status(
+                succ=succ, fail=fail, in_flight=in_flight, total=total, cancelled=cancelled)
             conn.execute(
                 """UPDATE publish_batches
                    SET status=?, success_count=?, failed_count=?, account_count=?,

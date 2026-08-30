@@ -464,6 +464,24 @@
               </div>
             </template>
 
+            <!-- 快手专属卡片(合集为账号级,选中账号后才显示) -->
+            <template v-if="selectedPlatform === 'kuaishou' && selectedAccountId">
+              <div class="setting-card" :style="{ borderColor: currentPlatformConfig.color + '26', background: currentPlatformConfig.color + '0a' }">
+                <div class="setting-label" :style="{ color: currentPlatformConfig.color }">选择合集</div>
+                <RemoteSearchSelect
+                  v-model="form.kuaishouCollectionName"
+                  :data="form.kuaishouCollectionData"
+                  :fetcher="fetchKuaishouCollections"
+                  :field-map="{ label: 'name' }"
+                  search-mode="frontend"
+                  empty-behavior="load-all"
+                  placeholder="选择合集"
+                  search-placeholder="输入合集名称,按回车搜索"
+                  @change="handleKuaishouCollectionChange"
+                />
+              </div>
+            </template>
+
             <!-- 视频号平台级字段(选中平台就显示,无需先选账号) -->
             <template v-if="selectedPlatform === 'channels'">
               <div class="setting-card" :style="{ borderColor: currentPlatformConfig.color + '26', background: currentPlatformConfig.color + '0a' }">
@@ -975,6 +993,7 @@ import ChannelsDramaPicker from '@/components/ChannelsDramaPicker.vue'
 import { channelsDramaApi } from '@/api/channels_drama'
 import { xhsApi } from '@/api/xiaohongshu'
 import { biliApi } from '@/api/bilibili'
+import { kuaishouApi } from '@/api/kuaishou'
 import { douyinImageApi } from '@/api/douyinImage'
 import { alipayApi } from '@/api/alipay'
 import { toutiaoApi } from '@/api/toutiao'
@@ -1243,6 +1262,9 @@ function mergeConfig(common, platformDefault, platformOv, accountOv) {
     // B 站合集(账号级)
     biliCollectionName: accountOv?.biliCollectionName ?? platformOv?.biliCollectionName ?? platformDefault?.biliCollectionName ?? '',
     biliCollectionData: accountOv?.biliCollectionData ?? platformOv?.biliCollectionData ?? platformDefault?.biliCollectionData ?? null,
+    // 快手合集(账号级)
+    kuaishouCollectionName: accountOv?.kuaishouCollectionName ?? platformOv?.kuaishouCollectionName ?? platformDefault?.kuaishouCollectionName ?? '',
+    kuaishouCollectionData: accountOv?.kuaishouCollectionData ?? platformOv?.kuaishouCollectionData ?? platformDefault?.kuaishouCollectionData ?? null,
     // 视频号合集(账号级)
     channelsCollectionName: accountOv?.channelsCollectionName ?? platformOv?.channelsCollectionName ?? platformDefault?.channelsCollectionName ?? '',
     channelsCollectionData: accountOv?.channelsCollectionData ?? platformOv?.channelsCollectionData ?? platformDefault?.channelsCollectionData ?? null,
@@ -1365,7 +1387,7 @@ const landscapeCoverFrames = computed(() =>
 const DEFAULT_PLATFORM_CONFIGS = {
   douyin: { title: '', description: '', tags: [], aiContent: '无需添加自主声明', isOriginal: true, scheduleTime: '', activityId: [], hotspotId: '', hotspotData: null, selectedTag: null, tagType: '', tagValue: '', mixId: '', mixData: null },
   xiaohongshu: { title: '', description: '', aiContent: '', isOriginal: true, scheduleTime: '', tags: [], collectionId: '', collectionName: '', collectionData: null },
-  kuaishou: { title: '', description: '', aiContent: '内容无需添加声明', isOriginal: true, scheduleTime: '', tags: [] },
+  kuaishou: { title: '', description: '', aiContent: '内容无需添加声明', isOriginal: true, scheduleTime: '', tags: [], kuaishouCollectionName: '', kuaishouCollectionData: null },
   bilibili: { title: '', description: '', zone: '', tags: [], creationDeclaration: '', biliRepostSource: '', biliKeepSystemTags: true, isOriginal: true, scheduleTime: '', biliCollectionName: '', biliCollectionData: null },
   channels: { title: '', description: '', isOriginal: true, scheduleTime: '', tags: [], channelsCollectionName: '', channelsCollectionData: null, channelsLocationName: '', channelsLocationData: null, channelsActivityName: '', channelsActivityData: null, channelsMarkTag: '无需标注', channelsShootDate: '', channelsShootRegion: [], channelsRepostSource: '', channelsDrama: [], channelsLinkType: '', channelsLinkArticleUrl: '', channelsRedEnvelopeUrl: '' },
   baijiahao: { title: '', description: '', isOriginal: true, scheduleTime: '', tags: [] },
@@ -2055,6 +2077,26 @@ function handleBiliCollectionChange(col) {
     form.biliCollectionData = col
   } else {
     form.biliCollectionData = null
+  }
+}
+
+// 快手合集 —— RemoteSearchSelect 数据源(后端一次返回全量,前端过滤)
+async function fetchKuaishouCollections(keyword) {
+  const resp = await kuaishouApi.getCollections(selectedAccountId.value)
+  const all = resp.data?.list || []
+  const kw = keyword?.trim().toLowerCase()
+  return {
+    list: kw ? all.filter(c => c.name?.toLowerCase().includes(kw)) : all
+  }
+}
+
+// 快手合集选择回调:v-model 已把 kuaishouCollectionName 绑到 form,
+// 这里把完整对象存到 form.kuaishouCollectionData 便于回显
+function handleKuaishouCollectionChange(col) {
+  if (col) {
+    form.kuaishouCollectionData = col
+  } else {
+    form.kuaishouCollectionData = null
   }
 }
 
@@ -3800,11 +3842,31 @@ function formatSize(bytes) {
   outline: none;
 }
 
-// 空态上传下拉包装：撑满 phone-screen,让 .phone-empty 保持原有布局
+// 空态上传下拉包装：外层撑满 phone-screen 居中，内层触发器收敛为内容尺寸的
+// 虚线按钮 —— 弹层锚定到按钮下方，而不是全屏区域的边缘
 .phone-upload-dropdown {
   display: flex;
+  align-items: center;
+  justify-content: center;
   width: 100%;
   height: 100%;
+
+  .phone-empty {
+    width: auto;
+    height: auto;
+    gap: 6px;
+    padding: 16px 28px;
+    border: 1px dashed $border;
+    border-radius: 10px;
+    font-size: 12px;
+    transition: border-color 0.15s, color 0.15s, background 0.15s;
+
+    &:hover {
+      border-color: $brand-start;
+      color: $brand-start;
+      background: rgba($brand-start, 0.06);
+    }
+  }
 }
 
 .phone-empty {

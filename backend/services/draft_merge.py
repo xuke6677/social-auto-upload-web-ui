@@ -485,6 +485,8 @@ def build_platform_kwargs(merged, common, account):
         'xhs_repost_source': merged.get('xhsRepostSource', '') or '',
         # B 站合集(账号级)
         'bili_collection_name': merged.get('biliCollectionName', '') or '',
+        # 快手合集(账号级)
+        'kuaishou_collection_name': merged.get('kuaishouCollectionName', '') or '',
         # 视频号合集(账号级)
         'channels_collection_name': merged.get('channelsCollectionName', '') or '',
         # 视频号位置(平台级,空=不显示位置)

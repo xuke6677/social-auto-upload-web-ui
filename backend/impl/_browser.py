@@ -58,7 +58,10 @@ async def create_browser(
     from cloakbrowser import launch_async
     browser = await launch_async(
         headless=headless,
-        args=["--start-maximized"],
+        # --deny-permission-prompts: 自动拒绝地理位置/通知等权限请求弹窗。
+        # 支付宝发布页会请求地理位置授权,弹窗不走页面 DOM,自动化无法点击,
+        # 会永久阻塞发布流程,这里在浏览器层统一禁用(对全平台生效)。
+        args=["--start-maximized", "--deny-permission-prompts"],
         humanize=humanize,
         human_preset=human_preset,
     )

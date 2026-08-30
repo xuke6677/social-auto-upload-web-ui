@@ -163,6 +163,10 @@ from blueprints.kuaishou_image_bp import kuaishou_image_bp  # noqa: E402
 app.register_blueprint(kuaishou_image_bp)
 logger.info("[Startup] kuaishou_image_bp registered OK")
 
+from blueprints.kuaishou_bp import kuaishou_bp  # noqa: E402
+app.register_blueprint(kuaishou_bp)
+logger.info("[Startup] kuaishou_bp registered OK")
+
 from blueprints.uploads_bp import uploads_bp  # noqa: E402
 app.register_blueprint(uploads_bp)
 logger.info("[Startup] uploads_bp registered OK")
@@ -1088,6 +1092,8 @@ def postVideo():
                 xhs_repost_source=data.get('xhsRepostSource', ''),
                 # B 站合集(账号级)
                 bili_collection_name=data.get('biliCollectionName', ''),
+                # 快手合集(账号级)
+                kuaishou_collection_name=data.get('kuaishouCollectionName', ''),
                 # 视频号合集(账号级)
                 channels_collection_name=data.get('channelsCollectionName', ''),
                 # 视频号位置(平台级,空=不显示位置)
@@ -1348,19 +1354,18 @@ def _update_publish_result(detail_id, status, finished_at, error_message=""):
                 """SELECT
                     COUNT(*) AS total,
                     SUM(CASE WHEN status='success' THEN 1 ELSE 0 END) AS success_n,
-                    SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed_n
+                    SUM(CASE WHEN status='failed' THEN 1 ELSE 0 END) AS failed_n,
+                    SUM(CASE WHEN status IN ('running', 'queued') THEN 1 ELSE 0 END) AS in_flight_n,
+                    SUM(CASE WHEN status='cancelled' THEN 1 ELSE 0 END) AS cancelled_n
                    FROM publish_details WHERE batch_id=?""",
                 (batch_id,)
             ).fetchone()
-            total, succ, fail = counts[0], counts[1] or 0, counts[2] or 0
-            if total == 0:
-                batch_status = 'pending'
-            elif fail == 0:
-                batch_status = 'success'
-            elif succ == 0:
-                batch_status = 'failed'
-            else:
-                batch_status = 'partial'
+            total, succ, fail, in_flight, cancelled = (
+                counts[0], counts[1] or 0, counts[2] or 0, counts[3] or 0, counts[4] or 0)
+            # 与 ext_api.task_queue 同一套聚合规则（cancelled 计入非成功方）
+            from ext_api.task_queue import aggregate_batch_status
+            batch_status = aggregate_batch_status(
+                succ=succ, fail=fail, in_flight=in_flight, total=total, cancelled=cancelled)
             conn.execute(
                 """UPDATE publish_batches
                    SET status=?, success_count=?, failed_count=?, account_count=?,
