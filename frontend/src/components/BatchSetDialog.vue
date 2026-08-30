@@ -29,6 +29,7 @@
       </el-form-item>
       <el-form-item label="标签">
         <div class="tag-input-wrap">
+          <div class="tag-input-hint">输入标签内容，支持 # 或逗号批量输入</div>
           <el-input
             v-model="tagInput"
             placeholder="输入标签内容，按回车添加"
@@ -66,6 +67,7 @@
               'is-checked': checkedKeys.has(p.key),
               'is-disabled': p.count === 0
             }]"
+            :title="p.count === 0 ? '该平台没有已选发布账号，本次批量设置不会应用到它' : ''"
             role="checkbox"
             :aria-checked="checkedKeys.has(p.key)"
             :aria-disabled="p.count === 0"
@@ -287,6 +289,12 @@ function handleApply(mode = 'full', scope = 'current') {
   flex-direction: column;
   gap: 8px;
   width: 100%;
+}
+
+.tag-input-hint {
+  font-size: 12px;
+  color: $text-muted;
+  line-height: 1.4;
 }
 
 .tags-list {

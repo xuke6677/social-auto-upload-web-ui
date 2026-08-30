@@ -7,35 +7,57 @@
       </span>
     </div>
     <div class="vq-scroll">
-      <div
+      <el-dropdown
         v-for="(v, i) in videos"
         :key="i"
-        :class="['vq-card', { active: i === current }]"
-        @click="$emit('select', i)"
+        class="vq-card-dropdown"
+        trigger="click"
+        placement="bottom-start"
+        :disabled="v.hasVideo"
+        @command="(cmd) => $emit('replace', i, cmd)"
       >
-        <div class="vq-thumb">
-          <img v-if="v.coverUrl" :src="v.coverUrl" loading="lazy" alt="" />
-          <div v-else class="vq-thumb-empty">
-            <el-icon :size="18"><VideoCameraFilled /></el-icon>
+        <div :class="['vq-card', { active: i === current }]" @click="$emit('select', i)">
+          <div class="vq-thumb">
+            <img v-if="v.coverUrl" :src="v.coverUrl" loading="lazy" alt="" />
+            <div v-else class="vq-thumb-empty">
+              <el-icon :size="18"><VideoCameraFilled /></el-icon>
+            </div>
+            <!-- 未上传:常显上传入口提示,点击卡片弹出 素材库/本地上传 菜单 -->
+            <div v-if="!v.hasVideo" class="vq-upload-hint">
+              <el-icon :size="15"><Plus /></el-icon>
+              <span>上传视频</span>
+            </div>
+            <span v-if="!v.hasVideo" class="vq-badge vq-badge--danger">未上传</span>
+            <span v-else-if="v.warn" class="vq-badge vq-badge--warn">待完善</span>
+            <button
+              v-if="videos.length > 1"
+              class="vq-remove"
+              title="移除该视频"
+              @click.stop="$emit('remove', i)"
+            >
+              <el-icon :size="12"><Close /></el-icon>
+            </button>
+            <span v-if="i === current" class="vq-current-tag">编辑中</span>
           </div>
-          <span v-if="!v.hasVideo" class="vq-badge vq-badge--danger">未上传</span>
-          <span v-else-if="v.warn" class="vq-badge vq-badge--warn">待完善</span>
-          <button
-            v-if="videos.length > 1"
-            class="vq-remove"
-            title="移除该视频"
-            @click.stop="$emit('remove', i)"
-          >
-            <el-icon :size="12"><Close /></el-icon>
-          </button>
-          <span v-if="i === current" class="vq-current-tag">编辑中</span>
+          <div class="vq-name" :title="v.name">{{ v.name }}</div>
+          <div class="vq-meta">
+            <span>{{ v.accountCount }} 账号</span>
+            <span v-if="v.hasSchedule" class="vq-meta-schedule">定时</span>
+          </div>
         </div>
-        <div class="vq-name" :title="v.name">{{ v.name }}</div>
-        <div class="vq-meta">
-          <span>{{ v.accountCount }} 账号</span>
-          <span v-if="v.hasSchedule" class="vq-meta-schedule">定时</span>
-        </div>
-      </div>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item command="library">
+              <el-icon><FolderOpened /></el-icon>
+              从素材库选择
+            </el-dropdown-item>
+            <el-dropdown-item command="upload">
+              <el-icon><UploadFilled /></el-icon>
+              本地上传
+            </el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
 
       <el-dropdown
         class="vq-add-dropdown"
@@ -76,7 +98,7 @@ const props = defineProps({
   current: { type: Number, default: 0 },
 })
 
-defineEmits(['select', 'add', 'remove'])
+defineEmits(['select', 'add', 'remove', 'replace'])
 
 const totalAccounts = computed(() =>
   props.videos.reduce((sum, v) => sum + (v.accountCount || 0), 0)
@@ -125,9 +147,30 @@ const totalAccounts = computed(() =>
   }
 
   // 添加卡片外层 dropdown 包装（inline span），保持 flex 布局不塌
-  .vq-add-dropdown {
+  .vq-add-dropdown,
+  .vq-card-dropdown {
     flex-shrink: 0;
     display: inline-flex;
+  }
+
+  // 「未上传」卡片的上传入口提示（常显，引导点击）
+  .vq-upload-hint {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    color: #fff;
+    font-size: 11px;
+    background: rgba(0, 0, 0, 0.35);
+    cursor: pointer;
+    transition: background 0.15s;
+
+    &:hover {
+      background: rgba($brand-start, 0.45);
+    }
   }
 
   .vq-card {

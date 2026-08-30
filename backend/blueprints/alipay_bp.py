@@ -92,7 +92,7 @@ def search_compilation():
 
     Query params:
         account_id: 账号 id(用于取 cookie)
-        keyword:    合集名称关键词
+        keyword:    合集名称关键词(可选,为空则返回全部)
 
     Returns:
         {"code": 200, "data": {"list": [...], "total": N, "hasMore": bool}}
@@ -100,12 +100,10 @@ def search_compilation():
     account_id = request.args.get('account_id')
     keyword = request.args.get('keyword', '')
 
+    # keyword 可为空:空关键词 = 拉取全量合集(前端下拉打开时自动加载,对齐抖音合集交互)
     logger.info(
-        f"[合集搜索] 收到请求: account_id={account_id}, keyword={keyword}"
+        f"[合集搜索] 收到请求: account_id={account_id}, keyword={keyword!r}(空=全量)"
     )
-
-    if not keyword:
-        return jsonify({"code": 400, "msg": "缺少 keyword 参数"}), 400
 
     try:
         cookie_file = _get_account_cookie_file(account_id)
@@ -236,8 +234,7 @@ async def _search_compilation_via_browser(cookie_file: str, keyword: str) -> dic
                     "error": f"等待表单渲染超时: {e}",
                 }
 
-            # 6. 定位合集搜索框 + fill 触发请求
-            logger.info(f"[合集搜索] 输入关键词: {keyword}")
+            # 6. 定位合集搜索框 + 触发查询请求
             compilation_input = page.locator(
                 "input[id$='_compilationInfo']"
             ).first
@@ -252,7 +249,16 @@ async def _search_compilation_via_browser(cookie_file: str, keyword: str) -> dic
                 }
 
             await compilation_input.click()
-            await compilation_input.fill(keyword)
+            if keyword:
+                logger.info(f"[合集搜索] 输入关键词: {keyword}")
+                await compilation_input.fill(keyword)
+            else:
+                # 空关键词=拉取全量:fill('') 不会触发组件查询,
+                # 输入一个空格再删除,让组件以空串发起下拉请求
+                logger.info("[合集搜索] 空关键词,触发全量查询")
+                await compilation_input.press(" ")
+                await asyncio.sleep(0.3)
+                await compilation_input.press("Backspace")
 
             # 7. 轮询等响应(最长 15s)
             for i in range(150):

@@ -341,7 +341,9 @@ async function handleSubmit() {
 onMounted(async () => {
   const email = localStorage.getItem('global_user_email')
   if (!email) {
+    // 未配置邮箱：只引导设置，不加载列表（远程接口缺 email 会返回 400）
     await promptForEmail()
+    return
   }
   await loadList()
 })

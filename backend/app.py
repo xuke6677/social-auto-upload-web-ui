@@ -1572,9 +1572,11 @@ def feedback_list():
         params['include_all'] = 'true'
 
     # 从 settings 表读用户邮箱，作为 metoo 计算依据
+    # 远程接口要求必传 email，未配置时直接友好报错，避免代理出去拿 400
     viewer_email = _get_feedback_email()
-    if viewer_email:
-        params['email'] = viewer_email
+    if not viewer_email:
+        return jsonify({'code': 400, 'message': '未配置反馈邮箱，请先在「系统设置 → 反馈系统」填写邮箱', 'data': None}), 400
+    params['email'] = viewer_email
 
     try:
         r = _requests.get(

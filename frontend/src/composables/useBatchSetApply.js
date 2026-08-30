@@ -34,24 +34,31 @@ export function useBatchSetApply({ platformConfigs, accountOverrides, accountChe
     const hasScheduleTime = scheduleTimeValue !== ''
 
     for (const pk of checkedPlatformKeys) {
+      const platformCfg = getPlatformByKey(pk)
+      // 按渠道 maxTags 截断（如快手 4 个）：批量写入超限标签时以前 N 个为准，
+      // 后面静默丢弃，避免发布前校验再拦「标签最多 N 个」
+      const maxTags = platformCfg?.maxTags
+      const tagsForPlatform = (typeof maxTags === 'number' && tagsCopy.length > maxTags)
+        ? tagsCopy.slice(0, maxTags)
+        : tagsCopy
+
       // 1. 渠道级（覆盖）
       if (!pcs[pk]) pcs[pk] = {}
       if (!isPartial || hasTitle) pcs[pk].title = title
       if (!isPartial || hasDescription) pcs[pk].description = description
-      if (!isPartial || hasTags) pcs[pk].tags = tagsCopy
+      if (!isPartial || hasTags) pcs[pk].tags = tagsForPlatform
       if (!isPartial || hasScheduleTime) pcs[pk].scheduleTime = scheduleTimeValue
 
       // 2. 该渠道下所有账号（覆盖）—— 不再用 accountChecked 筛选：
       //    五角星(账号级表单个性化)走的是 accountOverrides，与媒体开关 accountChecked 无关，
       //    故批量设置应替换该渠道下所有账号，无论是否已个性化。
-      const platformCfg = getPlatformByKey(pk)
       if (!platformCfg) continue
       const accounts = (accountStore?.accounts || []).filter(a => a.platform === platformCfg.name)
       for (const acc of accounts) {
         if (!aos[acc.id]) aos[acc.id] = {}
         if (!isPartial || hasTitle) aos[acc.id].title = title
         if (!isPartial || hasDescription) aos[acc.id].description = description
-        if (!isPartial || hasTags) aos[acc.id].tags = tagsCopy
+        if (!isPartial || hasTags) aos[acc.id].tags = tagsForPlatform
         if (!isPartial || hasScheduleTime) aos[acc.id].scheduleTime = scheduleTimeValue
       }
     }

@@ -56,6 +56,7 @@
         @select="switchVideo"
         @add="openAddVideosDialog"
         @remove="removeVideoAt"
+        @replace="openReplaceVideoDialog"
       />
 
       <!-- Scrollable content -->
@@ -727,9 +728,9 @@
                     :data="form.compilationData"
                     :fetcher="fetchCompilation"
                     :field-map="compilationFieldMap"
-                    search-mode="backend"
-                    empty-behavior="clear"
-                    placeholder="输入合集名称搜索"
+                    search-mode="frontend"
+                    empty-behavior="load-all"
+                    placeholder="选择合集"
                     search-placeholder="输入合集名称,按回车搜索"
                     @change="(val) => handleAlipayCompilationChange(field.key, val)"
                   />
@@ -777,10 +778,29 @@
                 ></video>
               </template>
               <template v-else>
-                <div class="phone-empty" @click="triggerUploadVideo()">
-                  <el-icon :size="28"><Upload /></el-icon>
-                  <span>上传视频</span>
-                </div>
+                <el-dropdown
+                  class="phone-upload-dropdown"
+                  trigger="click"
+                  placement="bottom"
+                  @command="handlePhoneUploadCommand"
+                >
+                  <div class="phone-empty">
+                    <el-icon :size="28"><Upload /></el-icon>
+                    <span>上传视频</span>
+                  </div>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="library">
+                        <el-icon><FolderOpened /></el-icon>
+                        从素材库选择
+                      </el-dropdown-item>
+                      <el-dropdown-item command="upload">
+                        <el-icon><UploadFilled /></el-icon>
+                        本地上传
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
               </template>
             </div>
             <div class="phone-home-bar"></div>
@@ -919,7 +939,7 @@
 
 <script setup>
 import { ref, reactive, computed, nextTick, watch, onMounted, onBeforeUnmount } from 'vue'
-import { Upload, Picture, VideoCameraFilled, Delete, Document, WarningFilled, MagicStick, Setting, Promotion, UserFilled, Close, Plus } from '@element-plus/icons-vue'
+import { Upload, Picture, VideoCameraFilled, Delete, Document, WarningFilled, MagicStick, Setting, Promotion, UserFilled, Close, Plus, FolderOpened, UploadFilled } from '@element-plus/icons-vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { useAccountStore } from '@/stores/account'
 import { useAppStore } from '@/stores/app'
@@ -1930,8 +1950,9 @@ async function fetchDouyinMixes(keyword) {
   }
 }
 
-// 支付宝/头条合集(compilation)—— RemoteSearchSelect 数据源(后端搜索模式)
-// 按 selectedPlatform 切换 api:头条用 toutiaoApi,其余用 alipayApi
+// 支付宝/头条合集(compilation)—— RemoteSearchSelect 数据源
+// 打开下拉自动以空关键词拉全量(对齐抖音合集交互),组件内 client 端过滤;
+// 头条后端原生支持空关键词返回全部,支付宝后端空关键词=全量查询
 async function fetchCompilation(keyword) {
   const api = selectedPlatform.value === 'toutiao' ? toutiaoApi : alipayApi
   const resp = await api.searchCompilation(selectedAccountId.value, keyword || '')
@@ -2182,9 +2203,11 @@ function onBatchSetApply(checkedKeys, payload) {
       }
     }
   }
+  // 成功提示列出实际应用的渠道名：渠道被跳过(未勾选/无已选账号被禁用)时用户能立刻发现
+  const appliedNames = checkedKeys.map(k => getPlatformByKey(k)?.name || k).join('、')
   ElMessage.success(allVideos
-    ? `已全视频替换 ${videoQueue.value.length} 个视频 · ${checkedKeys.length} 个渠道`
-    : `已批量设置到 ${checkedKeys.length} 个渠道`)
+    ? `已全视频替换 ${videoQueue.value.length} 个视频 · ${checkedKeys.length} 个渠道（${appliedNames}）`
+    : `已批量设置到 ${checkedKeys.length} 个渠道（${appliedNames}）`)
 }
 
 // Selected accounts
@@ -2391,10 +2414,79 @@ function openAddVideosDialog(mode) {
   }
 }
 
+// 队列「未上传」卡片的上传入口：记录待替换下标，复用添加视频的素材库/本地上传对话框。
+// 之后的 onVideosAdded / onQueueMaterialsSelected 会识别该状态走替换而非入队。
+const replaceVideoIndex = ref(null)
+function openReplaceVideoDialog(index, mode) {
+  replaceVideoIndex.value = index
+  openAddVideosDialog(mode)
+}
+
+// 替换队列中指定下标的视频：清 4 比例封面 + 自动填标题 + 后台抽帧补自动封面；
+// 替换的是当前编辑项时重新装载活状态并重抽帧。
+async function replaceQueueVideo(index, d) {
+  syncCurrentIntoQueue()
+  const snap = videoQueue.value[index]
+  if (!snap) return
+  const videoData = {
+    id: d.id,
+    name: d.original_filename,
+    url: getFileUrl(d.stored_path),
+    stored_path: d.stored_path,
+    size: d.file_size,
+    type: d.mime_type,
+    duration: d.duration ?? 0,
+  }
+  snap.commonConfig = snap.commonConfig || {}
+  snap.commonConfig.videoLandscape = _slimMaterial(videoData)
+  snap.commonConfig.videoPortrait = null
+  snap.commonConfig.coverLandscape = null
+  snap.commonConfig.coverPortrait = null
+  snap.commonConfig.coverLandscape169 = null
+  snap.commonConfig.coverPortrait916 = null
+  if (appStore.autoFillTitle) {
+    const title = videoData.name.replace(/\.[^.]+$/, '')
+    const pcs = snap.platformConfigs || {}
+    for (const key of Object.keys(pcs)) {
+      if (pcs[key]) pcs[key].title = title
+    }
+    const aos = snap.accountOverrides || {}
+    for (const aid of Object.keys(aos)) {
+      if (aos[aid]) aos[aid].title = title
+    }
+  }
+  if (index === currentVideoIndex.value) {
+    applyVideoSnapshot(snap)
+    tagInput.value = ''
+    landscapeFrames.value = []
+    portraitFrames.value = []
+    const dv = commonConfig.videoLandscape || commonConfig.videoPortrait
+    if (dv) triggerFrameExtraction(dv, 'landscape')
+  }
+  autoCoverForVideo(index, d)
+  hasChanges.value = true
+  ElMessage.success(`已替换视频：${videoData.name}`)
+}
+
 // 素材库多选回调：映射为与上传响应同构的数据，复用 onVideosAdded 入队逻辑
 async function onQueueMaterialsSelected(materials) {
   const list = (Array.isArray(materials) ? materials : [materials]).filter(Boolean)
   if (list.length === 0) return
+  // 替换模式（队列「未上传」卡片入口）：用第一个素材替换目标项，不做入队去重
+  if (replaceVideoIndex.value !== null) {
+    const idx = replaceVideoIndex.value
+    replaceVideoIndex.value = null
+    const m = list[0]
+    await replaceQueueVideo(idx, {
+      id: m.id,
+      original_filename: m.name,
+      stored_path: m.stored_path,
+      file_size: m.size,
+      mime_type: m.type,
+      duration: m.duration ?? 0,
+    })
+    return
+  }
   // 去重：跳过已在队列中的同一素材，避免误重复发布
   syncCurrentIntoQueue()
   const queuedIds = new Set(
@@ -2426,6 +2518,13 @@ async function onVideosAdded(responses) {
   addVideosDialogVisible.value = false
   const list = (responses || []).filter(Boolean)
   if (list.length === 0) return
+  // 替换模式（队列「未上传」卡片入口）：只用第一个视频替换目标项
+  if (replaceVideoIndex.value !== null) {
+    const idx = replaceVideoIndex.value
+    replaceVideoIndex.value = null
+    await replaceQueueVideo(idx, list[0])
+    return
+  }
   syncCurrentIntoQueue()
   const base = JSON.parse(JSON.stringify(videoQueue.value[currentVideoIndex.value] || {}))
   const firstNewIndex = videoQueue.value.length
@@ -2655,6 +2754,12 @@ function triggerUploadVideo() {
   // 统一上传入口:写入主字段 videoLandscape(onVideoUploaded 内固定)
   videoUploadTarget.value = 'landscape'
   videoUploadDialogVisible.value = true
+}
+
+// 手机模型「上传视频」空态的下拉命令：素材库 / 本地上传 双入口
+function handlePhoneUploadCommand(cmd) {
+  if (cmd === 'library') selectFromLibrary('video')
+  else triggerUploadVideo()
 }
 
 function clearVideo() {
@@ -3693,6 +3798,13 @@ function formatSize(bytes) {
   object-fit: contain;
   display: block;
   outline: none;
+}
+
+// 空态上传下拉包装：撑满 phone-screen,让 .phone-empty 保持原有布局
+.phone-upload-dropdown {
+  display: flex;
+  width: 100%;
+  height: 100%;
 }
 
 .phone-empty {

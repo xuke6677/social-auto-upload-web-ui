@@ -46,50 +46,62 @@
     <div class="filter-card">
       <div class="filter-row">
         <div class="filter-controls">
-          <el-select
-            v-model="timeRange"
-            placeholder="时间范围"
-            class="filter-select"
-            @change="handleFilterChange"
-          >
-            <el-option label="今天" value="today" />
-            <el-option label="最近7天" value="7days" />
-            <el-option label="最近30天" value="30days" />
-            <el-option label="全部" value="all" />
-          </el-select>
+          <div class="filter-field">
+            <span class="filter-label">时间范围</span>
+            <el-select
+              v-model="timeRange"
+              placeholder="时间范围"
+              class="filter-select"
+              @change="handleFilterChange"
+            >
+              <el-option label="今天" value="today" />
+              <el-option label="最近7天" value="7days" />
+              <el-option label="最近30天" value="30days" />
+              <el-option label="全部" value="all" />
+            </el-select>
+          </div>
 
-          <el-select
-            v-model="typeFilter"
-            placeholder="类型"
-            class="filter-select"
-            @change="handleFilterChange"
-          >
-            <el-option label="全部" value="all" />
-            <el-option label="视频" value="video" />
-            <el-option label="图集" value="image" />
-          </el-select>
+          <div class="filter-field">
+            <span class="filter-label">类型</span>
+            <el-select
+              v-model="typeFilter"
+              placeholder="类型"
+              class="filter-select"
+              @change="handleFilterChange"
+            >
+              <el-option label="全部" value="all" />
+              <el-option label="视频" value="video" />
+              <el-option label="图集" value="image" />
+            </el-select>
+          </div>
 
-          <el-select
-            v-model="platformFilter"
-            placeholder="平台"
-            class="filter-select"
-            @change="handleFilterChange"
-          >
-            <el-option label="全部" value="all" />
-            <el-option v-for="p in platformList" :key="p.key" :label="p.name" :value="p.key" />
-          </el-select>
+          <div class="filter-field">
+            <span class="filter-label">平台</span>
+            <el-select
+              v-model="platformFilter"
+              placeholder="平台"
+              class="filter-select"
+              @change="handleFilterChange"
+            >
+              <el-option label="全部" value="all" />
+              <el-option v-for="p in platformList" :key="p.key" :label="p.name" :value="p.key" />
+            </el-select>
+          </div>
 
-          <el-select
-            v-model="statusFilter"
-            placeholder="状态"
-            class="filter-select"
-            @change="handleFilterChange"
-          >
-            <el-option label="全部" value="all" />
-            <el-option label="全部成功" value="success" />
-            <el-option label="部分失败" value="partial" />
-            <el-option label="全部失败" value="failed" />
-          </el-select>
+          <div class="filter-field">
+            <span class="filter-label">状态</span>
+            <el-select
+              v-model="statusFilter"
+              placeholder="状态"
+              class="filter-select"
+              @change="handleFilterChange"
+            >
+              <el-option label="全部" value="all" />
+              <el-option label="全部成功" value="success" />
+              <el-option label="部分失败" value="partial" />
+              <el-option label="全部失败" value="failed" />
+            </el-select>
+          </div>
         </div>
 
         <div class="filter-actions">
@@ -634,6 +646,18 @@ onMounted(() => { fetchHistory(); fetchStats() })
       align-items: center;
       gap: 12px;
       flex-wrap: wrap;
+    }
+
+    .filter-field {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .filter-label {
+      font-size: 12px;
+      color: $text-muted;
+      white-space: nowrap;
     }
 
     .filter-select {
