@@ -1628,7 +1628,12 @@ class TaobaoGuanghePlatform(BasePlatform):
                 logger.info(f"[定时发布] ✓ 已选日期 {date_str}")
                 await asyncio.sleep(1)
             except Exception as e:
-                logger.info(f"[定时发布] 日历选日失败: {e}")
+                # 定时设置失败必须让任务失败,而不是按错误时间发出去
+                # (光合日历无翻月逻辑,目标月份不在当前面板时历史上会静默跳过)
+                raise RuntimeError(
+                    f"定时发布日期设置失败: 日历中未找到 {date_str}"
+                    f"（目标月份不在当前面板或日期被禁用）: {e}"
+                )
 
             # 4. 选时分
             try:
@@ -1668,7 +1673,9 @@ class TaobaoGuanghePlatform(BasePlatform):
             except Exception as e:
                 logger.info(f"[定时发布] 确定按钮异常: {e}")
         except Exception as exc:
-            logger.info(f"[定时发布] 设置失败（非致命）: {exc}")
+            logger.error(f"[定时发布] 设置失败: {exc}")
+            # 定时设置失败必须让任务失败,而不是按错误时间发出去
+            raise
 
     @staticmethod
     async def _link_products_or_shops(frame, link_type: str, items: list) -> None:

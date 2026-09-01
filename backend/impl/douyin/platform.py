@@ -868,16 +868,37 @@ class DouyinPlatform(BasePlatform):
             await page.locator('.semi-input[placeholder="日期和时间"]').click()
             await asyncio.sleep(1)
 
-            # 3. 选择日期：点击对应日期格(title=YYYY-MM-DD，排除禁用日期)
+            # 3. 选择日期：点击对应日期格(title=YYYY-MM-DD，排除禁用日期)。
+            # 面板默认展示当前月，目标日期在后续月份时必须逐月向后翻，
+            # 否则会静默保留平台默认日期(次日)——2026-08-30 定时 09-02 被发到 08-31 的事故。
             iso_date = dt.strftime("%Y-%m-%d")
             day_cell = page.locator(
                 f'.semi-datepicker-day:not(.semi-datepicker-day-disabled)[title="{iso_date}"]'
             )
-            if await day_cell.count():
-                await day_cell.first.click()
-                logger.info("[定时发布] 日期已选择: %s", iso_date)
-            else:
-                logger.warning("[定时发布] 未找到可选日期 %s，跳过日期选择", iso_date)
+            date_clicked = False
+            for _ in range(7):  # 当前月 + 最多向后翻 6 个月
+                if await day_cell.count():
+                    await day_cell.first.click()
+                    date_clicked = True
+                    logger.info("[定时发布] 日期已选择: %s", iso_date)
+                    break
+                # 目标日期不在当前面板：点「下个月」继续翻。
+                # Semi 导航区按钮顺序为 «(上年) ‹(上月) ›(下月) »(下年)，
+                # 4 个按钮取下月(倒数第 2 个)，2 个按钮取最后一个。
+                nav_btns = page.locator('.semi-datepicker-navigation button')
+                btn_count = await nav_btns.count()
+                if btn_count == 0:
+                    break
+                idx = btn_count - 2 if btn_count >= 4 else btn_count - 1
+                try:
+                    await nav_btns.nth(idx).click()
+                    await asyncio.sleep(0.5)
+                except Exception:
+                    break
+            if not date_clicked:
+                raise RuntimeError(
+                    f"定时发布日期设置失败: 翻月后仍未找到可选日期 {iso_date}"
+                )
             await asyncio.sleep(0.5)
 
             # 4. 切换到时间选择滚轮
@@ -927,22 +948,24 @@ class DouyinPlatform(BasePlatform):
                 logger.info("[定时发布] 未找到确认按钮，已按 Enter 兜底")
             await asyncio.sleep(1)
 
-            # 8. 校验输入框最终值，便于排查时间是否真的生效
+            # 8. 校验输入框最终值：日期+时间必须同时匹配。
+            # 修复前只校验 HH:MM，日期错了也会显示「校验成功」掩盖问题。
             try:
                 final_val = await page.input_value(
                     '.semi-input[placeholder="日期和时间"]'
                 )
-                if final_val and dt.strftime("%H:%M") in final_val:
-                    logger.info("[定时发布] 校验成功，输入框值: %s", final_val)
-                else:
-                    logger.warning(
-                        "[定时发布] 校验异常，输入框值: %s（期望含 %s）",
-                        final_val, dt.strftime("%H:%M"),
-                    )
             except Exception:
-                pass
+                final_val = ''
+            if final_val and iso_date in final_val and dt.strftime("%H:%M") in final_val:
+                logger.info("[定时发布] 校验成功，输入框值: %s", final_val)
+            else:
+                raise RuntimeError(
+                    f"定时发布校验失败: 输入框值 {final_val!r} 与期望 {expected!r} 不符"
+                )
         except Exception as exc:
             logger.error("[定时发布] 设置定时发布时间失败: %s", exc)
+            # 定时设置失败必须让任务失败,而不是按错误时间发出去
+            raise
 
     # ------------------------------------------------------------------
     # Helper: set product link (购物车)

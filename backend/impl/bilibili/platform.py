@@ -1630,9 +1630,11 @@ class BilibiliPlatform(BasePlatform):
                     date_set = True
                     break
             if not date_set:
-                logger.info(
-                    f"[上传视频] could not find clickable date: "
-                    f"{target_day}"
+                # 定时设置失败必须让任务失败,而不是按错误时间发出去
+                # (B站日历无翻月逻辑,目标日期不在当前面板时历史上会静默跳过)
+                raise RuntimeError(
+                    f"B站定时发布日期设置失败: 日历中未找到可点击日期 "
+                    f"{dt.strftime('%Y-%m-%d')}（目标月份不在当前面板或日期被禁用）"
                 )
             await asyncio.sleep(0.5)
 
@@ -1669,4 +1671,6 @@ class BilibiliPlatform(BasePlatform):
 
             logger.info("[定时发布] schedule time set")
         except Exception as exc:
-            logger.info(f"[定时发布] schedule time setting failed: {exc}")
+            logger.error(f"[定时发布] schedule time setting failed: {exc}")
+            # 定时设置失败必须让任务失败,而不是按错误时间发出去
+            raise
