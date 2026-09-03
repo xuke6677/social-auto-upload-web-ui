@@ -531,6 +531,9 @@ class AlipayPlatform(BasePlatform):
                 # 2. 等待表单可交互(标题输入框可见)
                 await self._wait_for_image_form(page)
 
+                # 2.1 关闭「AI智能优化」引导遮挡层(会拦截表单点击)
+                await self._dismiss_ai_guide_overlay(page)
+
                 # 3. 填标题
                 await self._set_title(page, title)
 
@@ -963,6 +966,9 @@ class AlipayPlatform(BasePlatform):
                 # 2. 等待上传完成 + 表单渲染
                 await self._wait_for_upload_form(page)
 
+                # 2.1 关闭「AI智能优化」引导遮挡层(会拦截表单点击)
+                await self._dismiss_ai_guide_overlay(page)
+
                 # 3. 填标题
                 await self._set_title(page, title)
 
@@ -1213,6 +1219,31 @@ class AlipayPlatform(BasePlatform):
     # ------------------------------------------------------------------
 
     @staticmethod
+    async def _dismiss_ai_guide_overlay(page):
+        """关闭「开启AI智能优化」引导遮挡层(.ai-optimization-guide-overlay)。
+
+        该遮挡层覆盖整个表单,Playwright 点击描述框等会被
+        div.ai-optimization-guide-block 拦截 pointer events 并永久卡死
+        (实测 retry 50+ 次仍被 intercepts pointer events)。
+        出现时点「暂不体验」关闭;最多等 3s,不出现直接返回。
+        """
+        try:
+            overlay = page.locator("div.ai-optimization-guide-overlay").first
+            for _ in range(6):
+                if await overlay.count() > 0 and await overlay.is_visible():
+                    btn = overlay.locator(
+                        'button:has-text("暂不体验"), span:has-text("暂不体验")'
+                    ).first
+                    if await btn.count() > 0:
+                        await btn.click(timeout=3000)
+                        logger.info("[上传视频] 已关闭「AI智能优化」引导遮挡层")
+                        await asyncio.sleep(0.5)
+                    return
+                await asyncio.sleep(0.5)
+        except Exception as e:
+            logger.debug("[上传视频] 关闭 AI 引导层异常(忽略): %s", e)
+
+    @staticmethod
     async def _set_description_and_tags(
         page, desc: str, title: str, tags: list
     ):
@@ -1229,6 +1260,9 @@ class AlipayPlatform(BasePlatform):
             "textarea.mentions-textarea__input"
         ).first
         await textarea.wait_for(state="visible", timeout=10000)
+
+        # 先关闭「AI智能优化」引导遮挡层(会拦截描述框点击)
+        await AlipayPlatform._dismiss_ai_guide_overlay(page)
 
         # 先填描述正文(不含 #话题,话题单独走联想)
         # 描述为空时不再回落标题，保持为空

@@ -910,31 +910,45 @@ class DouyinPlatform(BasePlatform):
             else:
                 logger.warning("[定时发布] 未找到时间切换开关 .semi-datepicker-switch-time")
 
-            # 5. 选择小时(滚轮内 li 文本为纯数字；选中项带「时」后缀，has_text 均可命中)
+            # 5. 选择小时(滚轮内 li 文本为纯数字,选中项带「时」后缀)。
+            # 用 JS 精确匹配文本点击:滚轮滚动动效期间 Playwright 物理点击
+            # 会落错项(实测期望 08:05 被点成 00:45),JS 精确匹配不受动效影响。
             hour = dt.strftime("%H")
-            hour_item = (
-                page.locator('.semi-scrolllist-item-wheel.undefined-list-hour li')
-                .filter(has_text=hour)
-            )
-            if await hour_item.count():
-                await hour_item.first.click()
+            hour_ok = await page.evaluate(
+                """(h) => {
+                    for (const list of document.querySelectorAll(
+                        '.semi-scrolllist-item-wheel.undefined-list-hour')) {
+                        for (const li of list.querySelectorAll('li')) {
+                            const t = (li.textContent || '').replace(/[^0-9]/g, '');
+                            if (t === h) { li.click(); return true; }
+                        }
+                    }
+                    return false;
+                }""", hour)
+            if hour_ok:
                 logger.info("[定时发布] 小时已选择: %s", hour)
             else:
                 logger.warning("[定时发布] 未找到小时项 %s", hour)
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.6)
 
-            # 6. 选择分钟
+            # 6. 选择分钟(同小时,JS 精确匹配点击)
             minute = dt.strftime("%M")
-            minute_item = (
-                page.locator('.semi-scrolllist-item-wheel.undefined-list-minute li')
-                .filter(has_text=minute)
-            )
-            if await minute_item.count():
-                await minute_item.first.click()
+            minute_ok = await page.evaluate(
+                """(m) => {
+                    for (const list of document.querySelectorAll(
+                        '.semi-scrolllist-item-wheel.undefined-list-minute')) {
+                        for (const li of list.querySelectorAll('li')) {
+                            const t = (li.textContent || '').replace(/[^0-9]/g, '');
+                            if (t === m) { li.click(); return true; }
+                        }
+                    }
+                    return false;
+                }""", minute)
+            if minute_ok:
                 logger.info("[定时发布] 分钟已选择: %s", minute)
             else:
                 logger.warning("[定时发布] 未找到分钟项 %s", minute)
-            await asyncio.sleep(0.4)
+            await asyncio.sleep(0.6)
 
             # 7. 确认(dateTime 模式需点「确定」；找不到则回车兜底)
             confirmed = False
