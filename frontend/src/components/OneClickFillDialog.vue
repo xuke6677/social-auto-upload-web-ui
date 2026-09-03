@@ -73,11 +73,6 @@ function formatRelativeTime(iso) {
   return d.toLocaleDateString('zh-CN')
 }
 
-function buildVideoCoverUrl(thumbPath) {
-  if (!thumbPath) return ''
-  return `${window.location.protocol}//${window.location.hostname}:5509/api/materials/file/${thumbPath}`
-}
-
 async function load() {
   loading.value = true
   try {
@@ -85,26 +80,9 @@ async function load() {
       type: props.type, page: page.value, page_size: pageSize.value
     })
     const items = res.data?.list || []
+    // 封面 URL 由后端组装好（与发布历史同一套兜底逻辑），相对路径走 Vite 代理
     for (const item of items) {
-      if (item.type === 'video' && item.thumbnail_path) {
-        item.coverSrc = buildVideoCoverUrl(item.thumbnail_path)
-      } else if (item.type === 'image' && item.first_image_id) {
-        try {
-          const m = await http.get(`/api/materials/${item.first_image_id}`)
-          const mat = m.data
-          if (mat) {
-            item.coverSrc = mat.stored_path
-              ? `${window.location.protocol}//${window.location.hostname}:5509/api/materials/file/${mat.stored_path.replace(/^\/+/, '')}`
-              : mat.url || ''
-          } else {
-            item.coverSrc = ''
-          }
-        } catch (_) {
-          item.coverSrc = ''
-        }
-      } else {
-        item.coverSrc = ''
-      }
+      item.coverSrc = item.cover_url || ''
     }
     list.value = items
     total.value = res.data?.total || 0

@@ -271,6 +271,10 @@ def _build_account_configs(task: 'PublishTask') -> dict:
         'scheduleTime': task.schedule_time,
         'aiContent': task.ai_content,
         'isOriginal': task.is_original,
+        # 完整发布 payload（含平台特有字段：分区/声明/合集等）。
+        # 上面 14 个字段只够还原历史卡片展示，不够重建发布任务；
+        # 持久化 payload 后，失败任务可在服务重启后从 DB 原样重发。
+        'publishPayload': task.payload or None,
     }
 
 
@@ -541,6 +545,47 @@ class TaskQueue:
                 self._update_db(task)
                 return True
         return False
+
+    def republish_task(self, task: PublishTask) -> bool:
+        """重发：把已存在的失败 detail 对应的任务重新入队。
+
+        与 add_task 的区别：detail 行已存在（id 相同），不 INSERT，
+        只把原行重置为 queued（清错误/发布链接/起止时间）后刷新 batch 聚合。
+        服务重启后内存里没有任何任务，靠这个方法从 DB 重建并重发。
+        """
+        if not self._started:
+            self.start()
+        with self._cancel_lock:
+            # 幂等：同 id 任务正在队列/执行中，拒绝重复入队
+            if task.id in self.running or task.id in self._queued_ids:
+                return False
+        task.status = TaskStatus.QUEUED
+        task.retry_count = 0
+        task.error_message = ""
+        task.publish_url = ""
+        task.started_at = None
+        task.finished_at = None
+        try:
+            with sqlite3.connect(str(DB_PATH)) as conn:
+                conn.execute(
+                    """UPDATE publish_details
+                       SET status='queued', retry_count=0, error_message='',
+                           publish_url='', started_at=NULL, finished_at=NULL
+                       WHERE id=?""",
+                    (task.id,),
+                )
+                row = conn.execute(
+                    "SELECT batch_id FROM publish_details WHERE id=?", (task.id,)
+                ).fetchone()
+                if row and row[0]:
+                    _refresh_batch_status(conn, row[0])
+        except Exception as e:
+            logger.info(f"[TaskQueue] 重发任务重置 DB 失败: {e}")
+            return False
+        self._queued_ids.add(task.id)
+        asyncio.run_coroutine_threadsafe(self.queue.put(task), self._loop)
+        logger.info(f"[TaskQueue] 任务已重新入队(重发): {task.id} ({task.platform}/{task.account_name})")
+        return True
 
     def get_status(self) -> dict:
         """获取队列状态"""

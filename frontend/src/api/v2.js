@@ -45,6 +45,10 @@ export const historyApi = {
   batchDelete(batchIds) {
     return request.delete('/api/v2/history/batch', { data: { batch_ids: batchIds } })
   },
+  // 按账号重新发布（仅失败状态可用；成功账号后端会 409 拒绝）
+  republishDetail(detailId) {
+    return http.post(`/api/v2/publish-details/${detailId}/republish`)
+  },
 }
 
 // 统计数据

@@ -10,6 +10,14 @@
         </span>
         <span v-if="batch?.created_at" class="header-time">{{ formatTime(batch.created_at) }}</span>
       </div>
+      <el-button
+        v-if="failedItems.length > 0"
+        type="warning"
+        size="small"
+        :icon="RefreshRight"
+        :loading="republishingAll"
+        @click="republishAllFailed"
+      >重发全部失败 ({{ failedItems.length }})</el-button>
     </header>
 
     <div class="detail-body">
@@ -76,6 +84,17 @@
               class="cancel-btn"
               @click="cancelCurrentTask"
             >取消发布</el-button>
+            <el-button
+              v-if="selectedItem.status === 'failed'"
+              type="warning"
+              plain
+              size="small"
+              class="republish-btn"
+              :icon="RefreshRight"
+              :loading="republishing"
+              :disabled="republishingAll"
+              @click="republishCurrentTask"
+            >重新发布</el-button>
             <a
               v-if="selectedItem.status === 'success' && selectedItem.publish_url"
               :href="selectedItem.publish_url"
@@ -174,7 +193,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { ArrowLeft, WarningFilled, DocumentRemove, CircleCloseFilled, Picture } from '@element-plus/icons-vue'
+import { ArrowLeft, WarningFilled, DocumentRemove, CircleCloseFilled, Picture, RefreshRight } from '@element-plus/icons-vue'
 import { useAccountStore } from '@/stores/account'
 import { accountApi } from '@/api/account'
 import { historyApi, taskApi } from '@/api/v2'
@@ -282,6 +301,70 @@ function goBack() {
 
 function isActiveStatus(s) {
   return s === 'pending' || s === 'queued' || s === 'running'
+}
+
+// ===== 重新发布（仅失败账号；成功账号绝不重复发布） =====
+const republishing = ref(false)
+const republishingAll = ref(false)
+
+const failedItems = computed(() =>
+  (batch.value?.items || []).filter(it => it.status === 'failed')
+)
+
+async function republishCurrentTask() {
+  const it = selectedItem.value
+  if (!it || it.status !== 'failed') return
+  const name = selectedAccount.value?.name || it.account_name || '该账号'
+  try {
+    await ElMessageBox.confirm(
+      `将以原配置重新发布到「${it.platform} · ${name}」？`,
+      '重新发布',
+      { confirmButtonText: '重新发布', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch { return }
+  republishing.value = true
+  try {
+    const res = await historyApi.republishDetail(it.id)
+    ElMessage.success(res?.msg || '已重新提交发布')
+    await fetchDetail()
+  } catch {
+    // 409/400 等错误提示已由响应拦截器 toast
+  } finally {
+    republishing.value = false
+  }
+}
+
+async function republishAllFailed() {
+  const items = failedItems.value
+  if (!items.length) return
+  try {
+    await ElMessageBox.confirm(
+      `将重新发布 ${items.length} 个失败账号（成功的账号不会重复发布），确认？`,
+      '重发全部失败',
+      { confirmButtonText: '全部重发', cancelButtonText: '取消', type: 'warning' },
+    )
+  } catch { return }
+  republishingAll.value = true
+  let ok = 0
+  const errs = []
+  // 串行逐个提交：视频任务本就串行入队，图集是同步执行，避免多浏览器并发
+  for (const it of items) {
+    try {
+      await historyApi.republishDetail(it.id)
+      ok++
+    } catch (e) {
+      errs.push(`${it.account_name || it.platform}: ${e?.message || '提交失败'}`)
+    }
+  }
+  republishingAll.value = false
+  if (errs.length === 0) {
+    ElMessage.success(`已重新提交 ${ok} 个失败账号`)
+  } else if (ok > 0) {
+    ElMessage.warning(`已提交 ${ok} 个，${errs.length} 个失败：${errs.join('；')}`)
+  } else {
+    ElMessage.error(`重发失败：${errs.join('；')}`)
+  }
+  await fetchDetail()
 }
 
 async function cancelCurrentTask() {

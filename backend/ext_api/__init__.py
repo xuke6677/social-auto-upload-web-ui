@@ -320,6 +320,162 @@ def retry_task(task_id):
     return jsonify({"code": 400, "msg": "无法重试该任务"}), 400
 
 
+@ext_api.route('/publish-details/<detail_id>/republish', methods=['POST'])
+def republish_detail(detail_id):
+    """按账号重新发布：从 DB 重建失败任务并重新执行。
+
+    与 /tasks/<id>/retry 的区别：retry 只认内存 completed 列表里的任务，
+    服务重启后必然 400；本端点从 publish_details + account_configs 重建任务，
+    重启后依然可用。
+
+    只允许 failed 状态的 detail 重发（成功账号绝不重复发布）；
+    同 id 任务在队列/执行中时返回 409（幂等防连点）。
+    """
+    import os
+    from types import SimpleNamespace
+
+    conn = _db_conn()
+    d = conn.execute(
+        "SELECT * FROM publish_details WHERE id = ?", (detail_id,)
+    ).fetchone()
+    if not d:
+        conn.close()
+        return jsonify({"code": 404, "msg": "发布记录不存在"}), 404
+    b = conn.execute(
+        "SELECT * FROM publish_batches WHERE id = ?", (d['batch_id'],)
+    ).fetchone()
+    acc = conn.execute(
+        "SELECT id, type, filePath, userName FROM user_info WHERE id = ?",
+        (d['account_id'],),
+    ).fetchone() if d['account_id'] is not None else None
+    conn.close()
+
+    if d['status'] != 'failed':
+        return jsonify({
+            "code": 409,
+            "msg": f"只有发布失败的账号才能重新发布（当前状态: {d['status']}）",
+        }), 409
+    if not b:
+        return jsonify({"code": 404, "msg": "批次记录不存在"}), 404
+    if not acc:
+        return jsonify({"code": 400, "msg": "账号已被删除，无法重新发布"}), 400
+
+    try:
+        cfg = json.loads(d['account_configs'] or '{}')
+    except json.JSONDecodeError:
+        cfg = {}
+
+    # ========== 图集：同步执行（与 /api/image-publish/publish 同一链路） ==========
+    if b['type'] == 'image':
+        try:
+            image_ids = json.loads(b['image_material_ids'] or '[]')
+        except (json.JSONDecodeError, TypeError):
+            image_ids = []
+        from blueprints.image_publish_bp import (
+            resolve_image_files, execute_image_publish, _update_image_publish_detail,
+        )
+        image_files = resolve_image_files(image_ids)
+        if not image_files:
+            return jsonify({"code": 400, "msg": "原图片文件已被删除，无法重新发布"}), 400
+
+        config = dict(cfg)
+        config['filePath'] = acc['filePath'] or ''
+        config.setdefault('account_id', d['account_id'])
+        config.setdefault('account_name', acc['userName'] or d['account_name'])
+        config.setdefault('platform', d['platform'])
+        if not config.get('filePath'):
+            return jsonify({"code": 400, "msg": "账号 cookie 文件缺失，无法重新发布"}), 400
+
+        # 先落 running（清上次错误），执行完再落终态
+        now = datetime.now().isoformat()
+        rconn = _db_conn()
+        rconn.execute(
+            "UPDATE publish_details SET status='running', error_message='',"
+            " publish_url='', started_at=?, finished_at=NULL WHERE id=?",
+            (now, detail_id),
+        )
+        rconn.commit()
+        rconn.close()
+
+        success, err = execute_image_publish(config, image_files)
+        _update_image_publish_detail(detail_id, 'success' if success else 'failed',
+                                     error_message=err)
+        if success:
+            return jsonify({"code": 200, "msg": "重新发布成功",
+                            "data": {"detail_id": detail_id, "status": "success"}})
+        return jsonify({"code": 500, "msg": f"重新发布失败: {err}",
+                        "data": {"detail_id": detail_id, "status": "failed"}}), 500
+
+    # ========== 视频：重建 PublishTask 重新入队 ==========
+    from app import PLATFORM_ID_TO_KEY, PLATFORM_MAP
+    KEY_TO_PLATFORM_ID = {v: k for k, v in PLATFORM_ID_TO_KEY.items()}
+    account_platform = PLATFORM_ID_TO_KEY.get(acc['type'], '')
+    ptype = KEY_TO_PLATFORM_ID.get(account_platform)
+    if not ptype:
+        return jsonify({"code": 400, "msg": f"未知平台: {d['platform']}"}), 400
+
+    account_obj = SimpleNamespace(
+        id=acc['id'], platform=account_platform, file_path=acc['filePath'],
+    )
+
+    # 优先用持久化的完整 payload（含平台特有字段）；
+    # 历史记录没有 publishPayload 时，用 14 个基础字段重建（平台特有字段丢失，尽力而为）
+    payload = cfg.get('publishPayload')
+    if isinstance(payload, dict) and payload:
+        payload = dict(payload)
+        # cookie 可能被重新导入过，账号文件以 user_info 当前值为准
+        payload['account_file'] = [acc['filePath']] if acc['filePath'] else []
+    else:
+        payload = build_platform_kwargs(cfg, {}, account_obj)
+
+    from storage import resolve_material_path
+    raw_video = (payload.get('files') or [''])[0]
+    resolved_video = resolve_material_path(raw_video) if raw_video else ''
+    if not resolved_video or not os.path.isfile(resolved_video):
+        return jsonify({"code": 400, "msg": "原视频文件已被删除，无法重新发布"}), 400
+    payload['files'] = [resolved_video]
+    # 封面路径也重新解析一次（旧记录里可能是已失效的绝对路径）
+    for cover_key in ('thumbnail_path', 'thumbnail_landscape_path',
+                      'thumbnail_portrait_path', 'thumbnail_landscape_169_path',
+                      'thumbnail_portrait_916_path'):
+        cover_val = payload.get(cover_key) or ''
+        if cover_val:
+            payload[cover_key] = resolve_material_path(cover_val) or cover_val
+
+    task = PublishTask(
+        id=d['id'],
+        batch_id=d['batch_id'],
+        platform=PLATFORM_MAP.get(acc['type'], d['platform']),
+        platform_type=ptype,
+        account_name=acc['userName'] or d['account_name'],
+        account_cookie_path=acc['filePath'] or '',
+        video_path=resolved_video,
+        title=payload.get('title', ''),
+        description=payload.get('desc', ''),
+        thumbnail_path=payload.get('thumbnail_path', '') or '',
+        tags=payload.get('tags') or [],
+        video_landscape=cfg.get('videoLandscape'),
+        video_portrait=cfg.get('videoPortrait'),
+        cover_landscape=cfg.get('coverLandscape'),
+        cover_portrait=cfg.get('coverPortrait'),
+        enable_timer=payload.get('enableTimer'),
+        schedule_time=payload.get('schedule_time_str'),
+        ai_content=payload.get('ai_content'),
+        is_original=payload.get('is_original'),
+        source='republish',
+        account_id=d['account_id'] or 0,
+        payload=payload,
+        # 重发与批量发布同语义：失败立即标记 FAILED，不自动重试
+        max_retries=0,
+    )
+
+    tq = get_task_queue()
+    if not tq.republish_task(task):
+        return jsonify({"code": 409, "msg": "该账号的发布任务已在队列中，请勿重复提交"}), 409
+    return jsonify({"code": 200, "msg": "已重新入队",
+                    "data": {"detail_id": detail_id, "status": "queued"}})
+
+
 # ========== SSE 实时推送 ==========
 
 @ext_api.route('/tasks/stream', methods=['GET'])
@@ -1235,11 +1391,25 @@ def get_publish_templates():
         except (json.JSONDecodeError, TypeError):
             first_image_id = None
 
+        # cover_url：与发布历史（/history）同一套组装 + 兜底逻辑。
+        # 视频封面多为抽帧/个性化封面，batch 列上的 material_id 常为空，
+        # 必须回落到 account_configs 里的 coverLandscape/coverPortrait/thumbnail_path，
+        # 否则一键填写弹窗全部显示占位图。image 类型再兜底第一张图。
+        cover_url = (
+            _resolve_cover_url(r['landscape_cover_material_id'] or '')
+            or _resolve_cover_url(r['portrait_cover_material_id'] or '')
+            or _resolve_cover_from_path(configs.get('coverLandscape'))
+            or _resolve_cover_from_path(configs.get('coverPortrait'))
+            or _resolve_cover_from_path(configs.get('thumbnail_path'))
+            or _resolve_cover_url(first_image_id or '')
+        )
+
         items.append({
             "id": r['id'],
             "type": r['type'],
             "title": r['title'] or '',
             "description": r['description'] or '',
+            "cover_url": cover_url,
             "thumbnail_path": thumbnail_path,
             "first_image_id": first_image_id,
             "video_material_id": r['video_material_id'] or '',

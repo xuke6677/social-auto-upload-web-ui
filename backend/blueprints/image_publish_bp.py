@@ -34,6 +34,116 @@ def _get_db():
 
 # ========== 发布 ==========
 
+def resolve_image_files(image_ids):
+    """image_ids → 本地文件路径列表（从 materials 表读 stored_path 再解析）。"""
+    from storage import get_storage
+    storage = get_storage()
+    image_files = []
+    conn = _get_db()
+    for img_id in image_ids:
+        row = conn.execute(
+            "SELECT stored_path FROM materials WHERE id = ?", (img_id,)
+        ).fetchone()
+        if row:
+            local_path = storage.get_local_path(row['stored_path'])
+            if local_path:
+                image_files.append(local_path)
+            else:
+                image_files.append(row['stored_path'])
+    conn.close()
+    return image_files
+
+
+def execute_image_publish(config, image_files):
+    """执行单账号图集发布（调用平台 publish_image）。
+
+    config: 单账号配置 dict（需含 platform / filePath / title 等，与 /publish 入参一致）
+    image_files: 已解析为本地路径的图片列表
+    返回 (success: bool, error_message: str)。不碰数据库，状态由调用方落库。
+    """
+    import asyncio
+    from impl.registry import get_platform
+
+    if not image_files or not config.get('platform') or not config.get('filePath'):
+        # 没有图片或缺配置：不调用平台（保留成功占位以便 batch 不卡 pending）
+        err = "无图片或缺平台/cookie 配置，跳过实际发布"
+        logger.info(f"[image_publish] {err}")
+        return True, err
+
+    try:
+        # 平台类型映射（支持中文名称和英文key）
+        platform_map = {
+            'douyin': 3,
+            '抖音': 3,
+            'xiaohongshu': 1,
+            '小红书': 1,
+            'kuaishou': 4,
+            '快手': 4,
+            'weibo': 11, '微博': 11,   # 新增
+            'alipay': 12, '支付宝': 12,  # 图集发布
+            'vivo': 16, 'VIVO': 16,
+            'weixin_gzh': 17, '微信公众号': 17,  # 公众号贴图
+        }
+        platform_id = platform_map.get(config.get('platform'))
+        if not platform_id:
+            raise ValueError(f"不支持的平台: {config.get('platform')}")
+
+        platform_obj = get_platform(platform_id)
+        if not platform_obj:
+            raise ValueError("无法获取平台实例")
+
+        dry_run = config.get('dry_run', True)
+
+        logger.info(f"发布参数: dry_run={dry_run}, cover_path={config.get('cover_path')}, "
+                    f"music_name={config.get('music_name')}, hotspot={config.get('hotspot')}, "
+                    f"hotspot_tags={config.get('hotspot_tags')}, "
+                    f"aiContent={config.get('aiContent')}, isOriginal={config.get('isOriginal')}, "
+                    f"tags={config.get('tags')}, "
+                    f"mix_id={config.get('mix_id')}, tag_type={config.get('tag_type')}, "
+                    f"tag_value={config.get('tag_value')}, mini_link={config.get('mini_link')}")
+
+        # 调用平台的 publish_image 方法
+        publish_fn = platform_obj.publish_image
+        publish_kwargs = dict(
+            title=config.get('title', ''),
+            files=image_files,
+            tags=config.get('tags', []),
+            account_file=[config.get('filePath')],
+            desc=config.get('description', ''),
+            cover_path=resolve_material_path(config.get('cover_path', '')),
+            mix_id=config.get('mix_id', ''),
+            music_name=config.get('music_name', ''),
+            hotspot=config.get('hotspot', ''),
+            tag_type=config.get('tag_type', ''),
+            tag_value=config.get('tag_value', ''),
+            mini_link=config.get('mini_link', ''),
+            enableTimer=bool(config.get('scheduleTime')),
+            schedule_time_str=config.get('scheduleTime', ''),
+            ai_content=config.get('aiContent', ''),
+            is_original=config.get('isOriginal', False),
+            activities=config.get('activities', []),
+            content_statement=config.get('contentStatement', ''),
+            content_statement2=config.get('contentStatement2', ''),
+            content_statement2_optional=config.get('contentStatement2Optional', ''),
+            author_declaration=config.get('aiContent', ''),
+            author_statement=config.get('author_statement', '') or config.get('authorStatement', ''),
+            music_id=config.get('music_id', ''),
+            music_title=config.get('music_title', ''),
+            # 微信公众号图集特有字段(视频发布侧用的 snake_case 此处补 camelCase 读取)
+            gzh_collection_name=config.get('gzhCollectionName', '') or config.get('gzh_collection_name', ''),
+            gzh_claim_source=config.get('gzhClaimSource', '') or config.get('gzh_claim_source', ''),
+            dry_run=dry_run,
+        )
+        if asyncio.iscoroutinefunction(publish_fn):
+            result = asyncio.run(publish_fn(**publish_kwargs))
+        else:
+            result = publish_fn(**publish_kwargs)
+        return bool(result), ""
+    except Exception as e:
+        logger.error(f"发布失败: {e}")
+        return False, str(e)
+
+
 def _update_image_publish_detail(detail_id, status, error_message=""):
     """更新单条 publish_details 状态，并聚合到 publish_batches"""
     try:
@@ -78,9 +188,6 @@ def _update_image_publish_detail(detail_id, status, error_message=""):
 @image_publish_bp.route('/publish', methods=['POST'])
 def publish_images():
     """发布图集内容到各平台（单账号 + batchId 模式，前端循环调用）"""
-    import asyncio
-    from impl.registry import get_platform
-
     data = request.get_json()
     if not data:
         return jsonify({"code": 400, "msg": "请求数据不能为空"}), 400
@@ -138,109 +245,9 @@ def publish_images():
     except Exception as e:
         return jsonify({"code": 500, "msg": f"写入失败: {e}"}), 500
 
-    # ---------- 实际发布执行（保留原有逻辑） ----------
-    success = False
-    err = ""
-    try:
-        # 获取图片文件路径（从 materials 表读取 stored_path，再解析本地路径）
-        from storage import get_storage
-        storage = get_storage()
-        image_files = []
-        conn = _get_db()
-        for img_id in image_ids:
-            row = conn.execute(
-                "SELECT stored_path FROM materials WHERE id = ?", (img_id,)
-            ).fetchone()
-            if row:
-                local_path = storage.get_local_path(row['stored_path'])
-                if local_path:
-                    image_files.append(local_path)
-                else:
-                    image_files.append(row['stored_path'])
-        conn.close()
-
-        # 即便 image_files 为空（如本测试），也要写完发布记录；只在有图片时才走平台调用
-        platform_type = config.get('platform')
-        cookie_file = config.get('filePath')
-
-        if image_files and platform_type and cookie_file:
-            # 平台类型映射（支持中文名称和英文key）
-            platform_map = {
-                'douyin': 3,
-                '抖音': 3,
-                'xiaohongshu': 1,
-                '小红书': 1,
-                'kuaishou': 4,
-                '快手': 4,
-                'weibo': 11, '微博': 11,   # 新增
-                'alipay': 12, '支付宝': 12,  # 图集发布
-                'vivo': 16, 'VIVO': 16,
-                'weixin_gzh': 17, '微信公众号': 17,  # 公众号贴图
-            }
-            platform_id = platform_map.get(platform_type)
-            if not platform_id:
-                raise ValueError(f"不支持的平台: {platform_type}")
-
-            platform_obj = get_platform(platform_id)
-            if not platform_obj:
-                raise ValueError("无法获取平台实例")
-
-            dry_run = config.get('dry_run', True)
-
-            logger.info(f"发布参数: dry_run={dry_run}, cover_path={config.get('cover_path')}, "
-                        f"music_name={config.get('music_name')}, hotspot={config.get('hotspot')}, "
-                        f"hotspot_tags={config.get('hotspot_tags')}, "
-                        f"aiContent={config.get('aiContent')}, isOriginal={config.get('isOriginal')}, "
-                        f"tags={config.get('tags')}, "
-                        f"mix_id={config.get('mix_id')}, tag_type={config.get('tag_type')}, "
-                        f"tag_value={config.get('tag_value')}, mini_link={config.get('mini_link')}")
-
-            # 调用平台的 publish_image 方法
-            publish_fn = platform_obj.publish_image
-            publish_kwargs = dict(
-                title=config.get('title', ''),
-                files=image_files,
-                tags=config.get('tags', []),
-                account_file=[cookie_file],
-                desc=config.get('description', ''),
-                cover_path=resolve_material_path(config.get('cover_path', '')),
-                mix_id=config.get('mix_id', ''),
-                music_name=config.get('music_name', ''),
-                hotspot=config.get('hotspot', ''),
-                tag_type=config.get('tag_type', ''),
-                tag_value=config.get('tag_value', ''),
-                mini_link=config.get('mini_link', ''),
-                enableTimer=bool(config.get('scheduleTime')),
-                schedule_time_str=config.get('scheduleTime', ''),
-                ai_content=config.get('aiContent', ''),
-                is_original=config.get('isOriginal', False),
-                activities=config.get('activities', []),
-                content_statement=config.get('contentStatement', ''),
-                content_statement2=config.get('contentStatement2', ''),
-                content_statement2_optional=config.get('contentStatement2Optional', ''),
-                author_declaration=config.get('aiContent', ''),
-                author_statement=config.get('author_statement', '') or config.get('authorStatement', ''),
-                music_id=config.get('music_id', ''),
-                music_title=config.get('music_title', ''),
-                # 微信公众号图集特有字段(视频发布侧用的 snake_case 此处补 camelCase 读取)
-                gzh_collection_name=config.get('gzhCollectionName', '') or config.get('gzh_collection_name', ''),
-                gzh_claim_source=config.get('gzhClaimSource', '') or config.get('gzh_claim_source', ''),
-                dry_run=dry_run,
-            )
-            if asyncio.iscoroutinefunction(publish_fn):
-                result = asyncio.run(publish_fn(**publish_kwargs))
-            else:
-                result = publish_fn(**publish_kwargs)
-            success = bool(result)
-        else:
-            # 没有图片或缺配置：不调用平台（保留成功占位以便 batch 不卡 pending）
-            err = "无图片或缺平台/cookie 配置，跳过实际发布"
-            logger.info(f"[image_publish] {err}")
-            success = True
-    except Exception as e:
-        logger.error(f"发布失败: {e}")
-        err = str(e)
-        success = False
+    # ---------- 实际发布执行 ----------
+    image_files = resolve_image_files(image_ids)
+    success, err = execute_image_publish(config, image_files)
 
     final_status = 'success' if success else 'failed'
     _update_image_publish_detail(detail_id, final_status, error_message=err)
