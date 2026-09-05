@@ -171,6 +171,14 @@ class AlipayPlatform(BasePlatform):
                     f"[alipay] cookie {'有效' if valid else '失效,需重新登录'} "
                     f"(final_url={final_url})"
                 )
+                if valid:
+                    # 有效时把 SSO 自动续期的新会话 cookie 写回快照。
+                    # 关键保鲜机制:支付宝会话 cookie 全是 session 级且服务端
+                    # 超时极短,只读流程不续写快照会导致登录态快速老化。
+                    try:
+                        await context.storage_state(path=cookie_path)
+                    except Exception:
+                        pass
                 return valid
             except Exception as exc:
                 logger.info(f"[alipay] cookie 检查异常: {exc}")

@@ -464,8 +464,8 @@
               </div>
             </template>
 
-            <!-- 快手专属卡片(合集为账号级,选中账号后才显示) -->
-            <template v-if="selectedPlatform === 'kuaishou' && selectedAccountId">
+            <!-- 快手专属卡片(合集按账号抓取;平台级视图也显示,后端回退任意快手账号) -->
+            <template v-if="selectedPlatform === 'kuaishou'">
               <div class="setting-card" :style="{ borderColor: currentPlatformConfig.color + '26', background: currentPlatformConfig.color + '0a' }">
                 <div class="setting-label" :style="{ color: currentPlatformConfig.color }">选择合集</div>
                 <RemoteSearchSelect

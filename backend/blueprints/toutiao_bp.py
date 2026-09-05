@@ -53,11 +53,20 @@ def _get_cookie_path(cookie_file: str) -> str:
 
 
 def _get_account_cookie_file(account_id: str) -> str:
-    """从数据库取账号 cookie 文件名。account_id 为空时取任意一个头条账号。"""
+    """从数据库取账号 cookie 文件名。account_id 为空时取任意一个头条账号。
+
+    前端模板字符串会把 null/undefined 拼成 "null"/"undefined" 字符串,
+    这里统一视为未传,回退到任意一个头条账号(type=13)。
+    """
+    if account_id in (None, "", "null", "undefined", "None"):
+        account_id = None
     conn = sqlite3.connect(str(Path(BASE_DIR / "db" / "database.db")))
     cursor = conn.cursor()
     if account_id:
-        cursor.execute("SELECT filePath FROM user_info WHERE id = ?", (account_id,))
+        cursor.execute(
+            "SELECT filePath FROM user_info WHERE id = ? AND type = 13",
+            (account_id,),
+        )
     else:
         cursor.execute("SELECT filePath FROM user_info WHERE type = 13 LIMIT 1")
     row = cursor.fetchone()

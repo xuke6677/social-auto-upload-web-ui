@@ -290,6 +290,12 @@ async def _search_compilation_via_browser(cookie_file: str, keyword: str) -> dic
                     "total": raw.get("total", 0),
                 })
 
+            # 成功抓取后把 SSO 续期的新会话 cookie 写回快照(登录态保鲜)
+            try:
+                await context.storage_state(path=cookie_path)
+            except Exception:
+                pass
+
             return {
                 "success": True,
                 "data": {
@@ -559,6 +565,12 @@ async def _fetch_music_list_via_browser(cookie_file: str) -> dict:
                     f"(stat={captured_response.get('stat')})",
                     "data": {"raw_sample": str(captured_response)[:500]},
                 }
+
+            # 成功抓取后把 SSO 续期的新会话 cookie 写回快照(登录态保鲜)
+            try:
+                await context.storage_state(path=cookie_path)
+            except Exception:
+                pass
 
             return {
                 "success": True,
