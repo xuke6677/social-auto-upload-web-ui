@@ -1118,63 +1118,88 @@ class ToutiaoPlatform(BasePlatform):
     # ------------------------------------------------------------------
 
     @staticmethod
+    async def _pick_schedule_option(page, select_sel: str, candidates: set, label: str):
+        """从 byte-select 下拉里精确选择一项(文本全等匹配,失败抛错并打印可见项)。"""
+        sel = page.locator(select_sel)
+        if not await sel.count():
+            raise RuntimeError(f"[定时发布] 未找到{label}下拉({select_sel})")
+        await sel.click()
+        await asyncio.sleep(1)
+        opts = page.locator('.byte-select-popup-inner .byte-select-option')
+        count = await opts.count()
+        texts = []
+        for i in range(count):
+            t = (await opts.nth(i).inner_text()).strip()
+            texts.append(t)
+            if t in candidates:
+                await opts.nth(i).click()
+                await asyncio.sleep(0.5)
+                logger.info("[定时发布] %s已选择: %s", label, t)
+                return
+        raise RuntimeError(
+            f"[定时发布] {label}下拉未找到 {sorted(candidates)}"
+            f"(共 {count} 项,可见: {texts[:12]})"
+        )
+
+    @staticmethod
     async def _set_schedule_time(page, publish_date):
-        """Set scheduled publish time."""
+        """Set scheduled publish time.
+
+        修复要点(2026-09-06 事故:定时 9/8-9/10 被一次性立即发布):
+        - 入口按钮 class 曾从 .timer 漂移为 .time,改用 class 前缀 + 文案匹配
+        - 每一步失败都抛错(原来静默跳过导致按默认时间立即发布)
+        """
         logger.info("[定时发布] 开始设置定时发布时间: %s", publish_date)
         try:
-            timer_btn = page.locator('button.action-footer-btn.timer:has-text("定时发布")')
-            if await timer_btn.count():
-                await timer_btn.click()
-                await asyncio.sleep(2)
-                logger.info("[定时发布] 已打开定时发布弹窗")
+            # 入口按钮:class 前缀 action-footer-btn + 文案(兼容 time/timer 漂移)
+            timer_btn = page.locator(
+                "button[class*='action-footer-btn']:has-text('定时发布')"
+            ).first
+            if not await timer_btn.count():
+                raise RuntimeError(
+                    "[定时发布] 未找到「定时发布」入口按钮(action-footer-btn)"
+                )
+            await timer_btn.click()
+            await asyncio.sleep(2)
+            logger.info("[定时发布] 已打开定时发布弹窗")
 
-                # Parse the publish date
-                month_day = publish_date.strftime("%m月%d日")
-                hour = str(publish_date.hour)
-                minute = str(publish_date.minute)
-                logger.info("[定时发布] 设置日期: %s, 时间: %s:%s", month_day, hour, minute)
+            month = publish_date.month
+            day = publish_date.day
+            hour = publish_date.hour
+            minute = publish_date.minute
+            day_candidates = {
+                f"{month}月{day}日",
+                f"{month:02d}月{day:02d}日",
+            }
+            hour_candidates = {
+                str(hour), f"{hour:02d}", f"{hour}点", f"{hour:02d}点",
+                f"{hour}时", f"{hour:02d}时",
+            }
+            minute_candidates = {
+                str(minute), f"{minute:02d}", f"{minute}分", f"{minute:02d}分",
+            }
+            logger.info(
+                "[定时发布] 设置日期: %d月%d日, 时间: %02d:%02d",
+                month, day, hour, minute,
+            )
 
-                # Select day
-                day_select = page.locator('.day-select .byte-select-view')
-                if await day_select.count():
-                    await day_select.click()
-                    await asyncio.sleep(1)
-                    day_option = page.locator(f'.byte-select-option:has-text("{month_day}")')
-                    if await day_option.count():
-                        await day_option.click()
-                        await asyncio.sleep(0.5)
-                        logger.info("[定时发布] 日期已选择: %s", month_day)
+            await ToutiaoPlatform._pick_schedule_option(
+                page, '.day-select .byte-select-view', day_candidates, "日期")
+            await ToutiaoPlatform._pick_schedule_option(
+                page, '.hour-select .byte-select-view', hour_candidates, "小时")
+            await ToutiaoPlatform._pick_schedule_option(
+                page, '.minute-select .byte-select-view', minute_candidates, "分钟")
 
-                # Select hour
-                hour_select = page.locator('.hour-select .byte-select-view')
-                if await hour_select.count():
-                    await hour_select.click()
-                    await asyncio.sleep(1)
-                    hour_option = page.locator(f'.byte-select-popup-inner .byte-select-option:has-text("{hour}")')
-                    if await hour_option.count():
-                        await hour_option.click()
-                        await asyncio.sleep(0.5)
-                        logger.info("[定时发布] 小时已选择: %s", hour)
-
-                # Select minute
-                minute_select = page.locator('.minute-select .byte-select-view')
-                if await minute_select.count():
-                    await minute_select.click()
-                    await asyncio.sleep(1)
-                minute_padded = minute.zfill(2)
-                minute_option = page.locator(f'.byte-select-popup-inner .byte-select-option:has-text("{minute_padded}")')
-                if await minute_option.count():
-                    await minute_option.click()
-                    await asyncio.sleep(0.5)
-                    logger.info("[定时发布] 分钟已选择: %s", minute_padded)
-
-                # Click the "定时发布" button in the dialog
-                confirm_btn = page.locator('.byte-modal-footer button:has-text("定时发布")')
-                if await confirm_btn.count():
-                    await confirm_btn.click()
-                    await asyncio.sleep(2)
-                    logger.info("[定时发布] 定时发布设置完成")
-            else:
-                logger.warning("[定时发布] 未找到定时发布按钮!")
+            # Click the "定时发布" button in the dialog
+            confirm_btn = page.locator(
+                '.byte-modal-footer button:has-text("定时发布")'
+            ).first
+            if not await confirm_btn.count():
+                raise RuntimeError("[定时发布] 未找到弹窗「定时发布」确认按钮")
+            await confirm_btn.click()
+            await asyncio.sleep(2)
+            logger.info("[定时发布] 定时发布设置完成: %s", publish_date)
         except Exception as e:
             logger.error("[定时发布] 设置定时发布时间失败: %s", e)
+            # 定时设置失败必须让任务失败,而不是按默认时间立即发布
+            raise

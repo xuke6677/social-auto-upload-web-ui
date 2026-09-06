@@ -669,8 +669,13 @@ class KuaishouPlatform(BasePlatform):
         # 合集名称(账号级,空=不加入合集)。app.py/draft_merge 透传键为 kuaishou_collection_name
         collection_name = kwargs.get("kuaishou_collection_name", "") or kwargs.get("collection_name", "")
 
-        # 固定使用 4:3 横版封面（用户要求），竖版/通用仅作缺失兜底
-        cover_path = thumbnail_landscape_path or thumbnail_portrait_path or thumbnail_path
+        # 按视频方向选封面:竖版视频优先 3:4 竖封面(横版兜底),
+        # 横版视频优先 4:3 横封面(竖版兜底)。
+        # 修复:此前固定用 4:3 横封面,竖版视频的海报被快手按横版裁掉左右文字。
+        if video_format == "portrait":
+            cover_path = thumbnail_portrait_path or thumbnail_landscape_path or thumbnail_path
+        else:
+            cover_path = thumbnail_landscape_path or thumbnail_portrait_path or thumbnail_path
 
         # 打印发布参数摘要
         logger.info("[发布参数] 标题: %s", title)
@@ -1063,9 +1068,10 @@ class KuaishouPlatform(BasePlatform):
             # 5. Select crop ratio (裁剪比例)
             #    快手封面弹窗右侧有「裁剪比例」选项(原始比例/4:3/3:4/1:1/9:16),
             #    DOM: div[class*='_ratio-item'] 内 <span> 文案为比例值。
-            #    固定选 4:3(用户要求,与上传的 4:3 封面文件一致),不按视频方向区分。
+            #    按视频方向选:竖版→3:4(与竖封面文件一致),横版→4:3。
+            #    修复:此前固定 4:3,竖版海报左右文字被裁掉。
             #    失败仅 warning, 不阻塞上传。
-            target_ratio = "4:3"
+            target_ratio = "3:4" if video_format == "portrait" else "4:3"
             logger.info("[封面] 正在选择裁剪比例: %s", target_ratio)
             try:
                 # 精确定位: ratio-item 内 span 文本 == 目标比例, 取其父级 item 点击。
