@@ -304,6 +304,51 @@ def getAccounts():
         return jsonify({"code": 500, "msg": f"获取账号列表失败: {str(e)}", "data": None}), 500
 
 
+# ── 账号默认合集（个性化设置）────────────────────────────────
+
+@app.route("/api/accounts/default-collections", methods=['GET'])
+def get_default_collections():
+    """读取所有账号的默认合集配置: { accountId: {name, id, data} }"""
+    try:
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            rows = conn.execute(
+                'SELECT account_id, default_collection FROM account_settings'
+            ).fetchall()
+        result = {}
+        for account_id, raw in rows:
+            try:
+                result[str(account_id)] = json.loads(raw or '{}')
+            except Exception:
+                result[str(account_id)] = {}
+        return jsonify({"code": 200, "msg": None, "data": result}), 200
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"获取默认合集失败: {str(e)}", "data": None}), 500
+
+
+@app.route("/api/accounts/<int:account_id>/default-collection", methods=['PUT'])
+def put_default_collection(account_id):
+    """保存/清空账号的默认合集。body: {name, id, data}，name 为空即清空"""
+    try:
+        data = request.get_json(force=True, silent=True) or {}
+        payload = {
+            "name": data.get("name") or "",
+            "id": data.get("id") or "",
+            "data": data.get("data"),
+        }
+        with sqlite3.connect(str(DB_PATH)) as conn:
+            conn.execute(
+                '''INSERT INTO account_settings (account_id, default_collection, updated_at)
+                   VALUES (?, ?, CURRENT_TIMESTAMP)
+                   ON CONFLICT(account_id) DO UPDATE SET
+                       default_collection = excluded.default_collection,
+                       updated_at = CURRENT_TIMESTAMP''',
+                (account_id, json.dumps(payload, ensure_ascii=False))
+            )
+        return jsonify({"code": 200, "msg": "保存成功", "data": payload}), 200
+    except Exception as e:
+        return jsonify({"code": 500, "msg": f"保存默认合集失败: {str(e)}", "data": None}), 500
+
+
 @app.route("/getValidAccounts", methods=['GET'])
 def getValidAccounts():
     """获取所有账号并使用新引擎逐个验证 cookie 有效性"""
@@ -368,6 +413,11 @@ def delete_account():
                         logger.info(f"[WARN] 删除Cookie文件失败: {e}")
 
             cursor.execute("DELETE FROM user_info WHERE id = ?", (account_id,))
+            # 顺带清理账号级个性化设置（默认合集等）
+            try:
+                cursor.execute("DELETE FROM account_settings WHERE account_id = ?", (account_id,))
+            except Exception:
+                pass
             conn.commit()
 
         return jsonify({"code": 200, "msg": "account deleted successfully", "data": None}), 200

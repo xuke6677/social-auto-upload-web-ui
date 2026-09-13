@@ -190,7 +190,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowLeft, WarningFilled, DocumentRemove, CircleCloseFilled, Picture, RefreshRight } from '@element-plus/icons-vue'
@@ -327,6 +327,7 @@ async function republishCurrentTask() {
     const res = await historyApi.republishDetail(it.id)
     ElMessage.success(res?.msg || '已重新提交发布')
     await fetchDetail()
+    startPollingIfActive()
   } catch {
     // 409/400 等错误提示已由响应拦截器 toast
   } finally {
@@ -365,6 +366,7 @@ async function republishAllFailed() {
     ElMessage.error(`重发失败：${errs.join('；')}`)
   }
   await fetchDetail()
+  startPollingIfActive()
 }
 
 async function cancelCurrentTask() {
@@ -381,6 +383,7 @@ async function cancelCurrentTask() {
     await taskApi.cancelTask(it.id)
     ElMessage.success('已请求取消，任务将终止')
     await fetchDetail()
+    startPollingIfActive()
   } catch (e) {
     ElMessage.error('取消失败: ' + (e?.message || e))
   }
@@ -395,19 +398,23 @@ function selectAccount(account /*, group */) {
   selectedAccountId.value = account.id
 }
 
-async function fetchDetail() {
+async function fetchDetail({ silent = false } = {}) {
   error.value = ''
-  loading.value = true
+  if (!silent) loading.value = true
   try {
     const res = await historyApi.getBatch(route.params.batchId)
     // 拦截器只在 data.code === 200 时 resolve，否则 reject；到这里就是成功
     batch.value = res.data
-    // 默认选中：找第一个 account_id 在 store 里能找到的 item
-    const firstValid = batch.value.items.find(it =>
-      it.account_id != null &&
-      accountStore.accounts.some(a => a.id === it.account_id)
-    )
-    if (firstValid) selectedAccountId.value = firstValid.account_id
+    // 默认选中：仅当前选中失效（首次进入/账号被删）时才回退到第一个有效账号，
+    // 轮询刷新时保持用户当前选中不被打断
+    const stillValid = batch.value.items.some(it => it.account_id === selectedAccountId.value)
+    if (!stillValid) {
+      const firstValid = batch.value.items.find(it =>
+        it.account_id != null &&
+        accountStore.accounts.some(a => a.id === it.account_id)
+      )
+      if (firstValid) selectedAccountId.value = firstValid.account_id
+    }
     // 展开所有有账号的组
     readonlyAccountGroups.value.forEach(g => expandedGroups.add(g.key))
   } catch (e) {
@@ -423,9 +430,26 @@ async function fetchDetail() {
       error.value = e.message || '加载失败'
     }
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
+
+// 有任务处于活跃状态（等待/排队/发布中）时轮询刷新，直到全部进入终态。
+// 此前页面只在挂载/操作后拉一次：任务后台失败后 UI 仍停留「发布中/排队中」，
+// 不显示异常信息，且点取消时任务已终态导致 400。
+let pollTimer = null
+function startPollingIfActive() {
+  stopPolling()
+  if (!(batch.value?.items || []).some(it => isActiveStatus(it.status))) return
+  pollTimer = setInterval(async () => {
+    await fetchDetail({ silent: true })
+    if (!(batch.value?.items || []).some(it => isActiveStatus(it.status))) stopPolling()
+  }, 3000)
+}
+function stopPolling() {
+  if (pollTimer) { clearInterval(pollTimer); pollTimer = null }
+}
+onBeforeUnmount(stopPolling)
 
 onMounted(async () => {
   // 串行：先加载账号 store，再拉详情
@@ -438,6 +462,7 @@ onMounted(async () => {
     console.error('加载账号列表失败:', e)
   }
   await fetchDetail()
+  startPollingIfActive()
 })
 </script>
 

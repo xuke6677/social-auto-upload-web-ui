@@ -60,6 +60,15 @@ export const accountApi = {
     return http.get(`/api/accounts/${accountId}/tags`)
   },
 
+  // ── 账号默认合集（个性化设置）──
+  getDefaultCollections() {
+    return http.get('/api/accounts/default-collections')
+  },
+
+  saveDefaultCollection(accountId, payload) {
+    return http.put(`/api/accounts/${accountId}/default-collection`, payload)
+  },
+
   // ── cookie 字符串导入账号 ──
 
   // 列出所有支持 cookie 导入的平台

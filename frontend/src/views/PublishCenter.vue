@@ -967,6 +967,7 @@ import { http } from '@/utils/request'
 import { accountApi } from '@/api/account'
 import { platformList, getPlatformByKey, platformKeyToId, platformNameToKey } from '@/config/platforms'
 import { parseTagInput, appendTags } from '@/utils/tags'
+import { collectionDefaultsToOverrides } from '@/config/accountCollections'
 import { validateVideoForPlatform, validateTitleForPlatform, validateDescForPlatform, countCharsWithEmoji } from '@/config/videoLimits'
 
 import AccountSidebar from '@/components/AccountSidebar.vue'
@@ -1151,12 +1152,46 @@ function onAccountCheckChange(checked) {
   }
 }
 
+// ========== 账号默认合集（个性化设置页配置） ==========
+// { [accountId]: { name, id, data } }，onMounted 时从后端加载
+const accountCollectionDefaults = ref({})
+
+// 把账号默认合集作为「平台默认之上的补充层」：只填 base 中为空缺的合集字段，
+// 不覆盖任何已显式选择的值（平台级/账号级覆写仍按原优先级生效）
+function withAccountCollectionDefaults(platformKey, accountId, base) {
+  if (!accountId) return base
+  const overrides = collectionDefaultsToOverrides(platformKey, accountCollectionDefaults.value?.[accountId])
+  if (!overrides) return base
+  const merged = { ...(base || {}) }
+  for (const [k, v] of Object.entries(overrides)) {
+    if (merged[k] === undefined || merged[k] === null || merged[k] === '') merged[k] = v
+  }
+  return merged
+}
+
+// 把账号默认合集物化为账号级覆写（只补空缺字段，不覆盖用户本次已选值）。
+// 在左侧选中账号时调用：合集随即作为该账号的个性化配置在表单中显示，
+// 并随 accountOverrides 进入发布载荷/草稿快照/批量应用，全程生效。
+function materializeAccountCollectionDefaults(platformKey, accountId) {
+  if (!platformKey || !accountId) return
+  const overrides = collectionDefaultsToOverrides(platformKey, accountCollectionDefaults.value?.[accountId])
+  if (!overrides) return
+  const existing = accountOverrides[accountId] || {}
+  const patch = {}
+  for (const [k, v] of Object.entries(overrides)) {
+    if (existing[k] === undefined || existing[k] === null || existing[k] === '') patch[k] = v
+  }
+  if (Object.keys(patch).length > 0) {
+    accountOverrides[accountId] = { ...existing, ...patch }
+  }
+}
+
 // ========== 4 级优先级合并（spec §3.3） ==========
-// accountOv > platformOv > platformDefault > common
+// accountOv > platformOv > platformDefault(+账号默认合集) > common
 function resolveAccountConfig(platformKey, accountId) {
   const accountOv = accountOverrides[accountId] || null
   const platformOv = platformOverrides[platformKey] || null
-  const platformDefault = platformConfigs[platformKey] || null
+  const platformDefault = withAccountCollectionDefaults(platformKey, accountId, platformConfigs[platformKey] || null)
   return mergeConfig(commonConfig, platformDefault, platformOv, accountOv)
 }
 
@@ -1658,7 +1693,8 @@ watch(() => form.jdRelatedType, (newType, oldType) => {
 function getMergedSettings() {
   const platformKey = selectedPlatform.value
   if (!platformKey) return {}
-  const platform = platformConfigs[platformKey] || {}
+  // 垫入账号默认合集（只补空缺），账号覆写仍在之后覆盖它
+  const platform = withAccountCollectionDefaults(platformKey, selectedAccountId.value, platformConfigs[platformKey] || {})
   if (selectedAccountId.value) {
     const override = accountOverrides[selectedAccountId.value]
     if (override && Object.keys(override).length > 0) {
@@ -1706,8 +1742,21 @@ function syncFormToMergedSettings() {
 }
 
 watch([selectedPlatform, selectedAccountId], () => {
+  // 左侧选中账号后，先把其默认合集物化为账号级覆写（只补空缺），再同步表单
+  materializeAccountCollectionDefaults(selectedPlatform.value, selectedAccountId.value)
   syncFormToMergedSettings()
 }, { immediate: true })
+
+// 默认合集为异步加载：加载完成后物化当前选中账号并刷新表单，
+// 避免「加载晚于账号选择」导致合集不显示（需切走再切回才出现）的问题
+watch(accountCollectionDefaults, () => {
+  // 覆盖所有已勾选发布账号（选择发生在默认合集加载完成前的场景）
+  materializeCollectionDefaultsForAccounts(Array.from(publishAccountIds))
+  if (selectedPlatform.value && selectedAccountId.value) {
+    materializeAccountCollectionDefaults(selectedPlatform.value, selectedAccountId.value)
+    syncFormToMergedSettings()
+  }
+})
 
 // 小红书:内容来源声明选「来源转载」时,转载内容不能声明原创 →
 // 强制把原创声明还原为「非原创」(false)。切换回自主拍摄/其他声明时由用户重新勾选。
@@ -1715,6 +1764,15 @@ watch(() => form.xhsSourceType, (val) => {
   if (selectedPlatform.value === 'xiaohongshu' && val === 'repost' && form.isOriginal !== false) {
     form.isOriginal = false
     ElMessage.info('已切换为来源转载，原创声明已自动改为非原创')
+  }
+})
+
+// 定时发布兜底：早于当前时间的值（手动输入绕过禁用 / 草稿恢复的过期时间）自动清空，
+// 从源头杜绝「定时时间已过去」导致的发布失败
+watch(() => form.scheduleTime, (val) => {
+  if (val && new Date(val) < new Date()) {
+    form.scheduleTime = ''
+    ElMessage.warning('定时发布时间早于当前时间，已清空，请重新选择')
   }
 })
 
@@ -2255,6 +2313,19 @@ function onBatchSetApply(checkedKeys, payload) {
 // Selected accounts
 const publishAccountIds = reactive(new Set())
 
+// 勾选发布账号时立即把各账号的默认合集物化为账号级覆写（只补空缺），
+// 无需先切换到该账号的编辑视图；批量设置/批量发布随之自动带上合集
+function materializeCollectionDefaultsForAccounts(ids) {
+  for (const aid of ids) {
+    const acc = accountStore.accounts.find(a => a.id === aid)
+    if (!acc) continue
+    materializeAccountCollectionDefaults(platformNameToKey[acc.platform], acc.id)
+  }
+}
+watch(() => Array.from(publishAccountIds), (ids) => {
+  materializeCollectionDefaultsForAccounts(ids)
+})
+
 // ========== 视频队列（批量发布） ==========
 // 每个队列元素 = 一份完整发布状态快照（与单视频 draft_data 同构，含所选账号/平台设置/个性化）。
 // 任意时刻只有 currentVideoIndex 对应的视频是「活状态」（顶层 reactive 对象），
@@ -2384,6 +2455,16 @@ function applyVideoSnapshot(dd) {
   expandedGroups.value = new Set(dd.expandedGroups || [])
   selectedPlatform.value = dd.selectedPlatform || null
   selectedAccountId.value = dd.selectedAccountId || null
+
+  // 恢复后若没有编辑目标账号，但当前平台下有已勾选发布的账号，
+  // 自动选中第一个作为编辑目标：账号级默认合集等配置直接在表单可见，
+  // 无需用户再点一次账号头像（合集是账号级配置，平台级视图不显示）
+  if (!selectedAccountId.value && selectedPlatform.value) {
+    const firstChecked = accountStore.accounts.find(a =>
+      publishAccountIds.has(a.id) && platformNameToKey[a.platform] === selectedPlatform.value
+    )
+    if (firstChecked) selectedAccountId.value = firstChecked.id
+  }
 
   // 平台/账号选中态可能没变（watch 不触发），强制把 form 同步到新视频的合并值
   syncFormToMergedSettings()
@@ -2786,6 +2867,21 @@ function onAccountConfirm(ids) {
   ids.forEach(id => {
     publishAccountIds.add(id)
   })
+  // 确认设置时立即物化各账号默认合集（同步执行，不依赖 watch 异步冲刷）
+  materializeCollectionDefaultsForAccounts(ids)
+  // 没有编辑目标账号（或原编辑目标已不在勾选内）时，自动选中第一个已勾选账号：
+  // 表单直接落在账号级个性化视图，默认合集立即可见，无需再点账号头像
+  if (!selectedAccountId.value || !ids.includes(selectedAccountId.value)) {
+    const firstChecked = accountStore.accounts.find(a =>
+      ids.includes(a.id) && platformNameToKey[a.platform] === selectedPlatform.value
+    ) || accountStore.accounts.find(a => ids.includes(a.id))
+    if (firstChecked) {
+      selectedAccountId.value = firstChecked.id
+      selectedPlatform.value = platformNameToKey[firstChecked.platform]
+      expandedGroups.value.clear()
+      expandedGroups.value.add(selectedPlatform.value)
+    }
+  }
   hasChanges.value = true
   ElMessage.success(`已选择 ${ids.length} 个账号`)
 }
@@ -3048,6 +3144,14 @@ onMounted(async () => {
     console.error('加载账号列表失败:', e)
   }
 
+  // 加载账号默认合集（个性化设置页配置），发布合并时作为兜底层
+  try {
+    const res = await accountApi.getDefaultCollections()
+    accountCollectionDefaults.value = res.data || {}
+  } catch (e) {
+    console.error('加载账号默认合集失败:', e)
+  }
+
   // 加载标签列表(确保「选择账号」弹窗内的标签筛选可用)
   accountStore.loadTags()
 
@@ -3077,7 +3181,7 @@ onMounted(async () => {
 function resolveAccountConfigFor(state, platformKey, accountId) {
   const accountOv = state.accountOverrides?.[accountId] || null
   const platformOv = state.platformOverrides?.[platformKey] || null
-  const platformDefault = state.platformConfigs?.[platformKey] || null
+  const platformDefault = withAccountCollectionDefaults(platformKey, accountId, state.platformConfigs?.[platformKey] || null)
   return mergeConfig(state.commonConfig || {}, platformDefault, platformOv, accountOv)
 }
 
@@ -3129,6 +3233,8 @@ function collectVideoErrors(state) {
   const accountsWithoutTitle = []
   const accountsWithoutCover = []
   const accountsVideoInvalid = []
+  const accountsScheduleExpired = []
+  const accountsToutiaoScheduleWindow = []
 
   for (const group of accountGroups.value) {
     if (group.accounts.length === 0) continue
@@ -3176,6 +3282,22 @@ function collectVideoErrors(state) {
       if (!merged.coverLandscape && !merged.coverPortrait) {
         accountsWithoutCover.push(`${account.name}(${group.name})`)
       }
+
+      // 3d. 定时发布时间：早于当前时间直接拦截（草稿/一键填写可能带入过期时间）
+      if (merged.scheduleTime && new Date(merged.scheduleTime) < new Date()) {
+        accountsScheduleExpired.push(`${account.name}(${group.name})`)
+      }
+
+      // 3f. 头条定时窗口：平台要求「当前时间后 2 小时 至 7 天」，超出直接拦截
+      // 注：头条竖版视频不支持定时(平台限制)，但规则是「竖版自动跳过定时直接发布」，
+      //     由后端降级处理，前端不拦截
+      if (platformKey === 'toutiao' && merged.scheduleTime) {
+        const t = new Date(merged.scheduleTime)
+        const now = Date.now()
+        if (t.getTime() < now + 2 * 3600 * 1000 || t.getTime() > now + 7 * 24 * 3600 * 1000) {
+          accountsToutiaoScheduleWindow.push(`${account.name}(${group.name})`)
+        }
+      }
     }
   }
 
@@ -3184,6 +3306,8 @@ function collectVideoErrors(state) {
   if (accountsWithoutReprintUrl.length > 0) errors.push({ type: '转载来源(支付宝)', accounts: accountsWithoutReprintUrl })
   if (accountsWithoutTitle.length > 0) errors.push({ type: '标题', accounts: accountsWithoutTitle })
   if (accountsWithoutCover.length > 0) errors.push({ type: '封面', accounts: accountsWithoutCover })
+  if (accountsScheduleExpired.length > 0) errors.push({ type: '定时发布时间早于当前时间，请重新设置', accounts: accountsScheduleExpired })
+  if (accountsToutiaoScheduleWindow.length > 0) errors.push({ type: '头条定时需为当前时间 2 小时后至 7 天内（平台限制）', accounts: accountsToutiaoScheduleWindow })
 
   // 4. 视频时长/大小 + 标题/简介长度校验
   for (const group of accountGroups.value) {

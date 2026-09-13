@@ -32,6 +32,14 @@ def init_database():
         avatar TEXT DEFAULT ''
     )
     """)
+    # 账号级个性化设置（默认合集等），独立表避免影响 /getAccounts 的 SELECT * 列序
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS account_settings (
+        account_id INTEGER PRIMARY KEY,
+        default_collection TEXT DEFAULT '{}',
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )
+    """)
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS file_records (
         id INTEGER PRIMARY KEY AUTOINCREMENT,

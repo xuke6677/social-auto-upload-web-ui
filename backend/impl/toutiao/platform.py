@@ -1156,6 +1156,18 @@ class ToutiaoPlatform(BasePlatform):
                 "button[class*='action-footer-btn']:has-text('定时发布')"
             ).first
             if not await timer_btn.count():
+                # 平台限制(2026-09-12 实测):竖版视频(宽<高,如 9:16)头条不开放
+                # 定时功能,页面显示 tip 且入口按钮不渲染。
+                # 按既定规则:竖版视频不拦截、不报错,跳过定时直接立即发布。
+                portrait_tip = page.locator(
+                    "div.tip:has-text('无原创、赞赏、定时等功能')"
+                )
+                if await portrait_tip.count():
+                    logger.warning(
+                        "[定时发布] 竖版视频头条平台不支持定时(平台限制),"
+                        "已跳过定时,改为立即发布"
+                    )
+                    return
                 raise RuntimeError(
                     "[定时发布] 未找到「定时发布」入口按钮(action-footer-btn)"
                 )

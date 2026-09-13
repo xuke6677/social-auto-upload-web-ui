@@ -483,6 +483,7 @@ export const PLATFORMS = {
           maxDate.setDate(maxDate.getDate() + 7);
           return time.getTime() < today.getTime() || time.getTime() > maxDate.getTime();
         },
+        // 头条定时窗口（平台规则）：当前时间后 2 小时 至 7 天
         disabledHours: (_role, comparingDate) => {
           if (!comparingDate) return [];
           const now = new Date();
@@ -491,7 +492,8 @@ export const PLATFORMS = {
             && d.getMonth() === now.getMonth()
             && d.getDate() === now.getDate();
           if (!isToday) return [];
-          return Array.from({ length: now.getHours() + 1 }, (_, i) => i);
+          // 禁用 0..now+1 点（最早可选 now+2 点；now+2 超过 23 时今天全禁）
+          return Array.from({ length: Math.min(now.getHours() + 2, 24) }, (_, i) => i);
         },
         disabledMinutes: (hour, _role, comparingDate) => {
           if (!comparingDate) return [];
@@ -500,8 +502,9 @@ export const PLATFORMS = {
           const isToday = d.getFullYear() === now.getFullYear()
             && d.getMonth() === now.getMonth()
             && d.getDate() === now.getDate();
-          if (isToday && hour === now.getHours()) {
-            return Array.from({ length: now.getMinutes() + 1 }, (_, i) => i);
+          // 最早可选小时 = 当前+2，该小时内分钟不得早于当前分钟
+          if (isToday && hour === now.getHours() + 2) {
+            return Array.from({ length: now.getMinutes() }, (_, i) => i);
           }
           return [];
         },

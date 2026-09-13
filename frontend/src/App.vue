@@ -120,7 +120,7 @@ import { useRoute, useRouter } from 'vue-router'
 import {
   HomeFilled, User, Picture, Upload,
   Clock, Setting, Expand, Fold, UserFilled, Document, Notebook, ChatDotRound,
-  Sunny, Moon, Coffee, Promotion
+  Sunny, Moon, Coffee, Promotion, MagicStick
 } from '@element-plus/icons-vue'
 import { useAppStore } from '@/stores/app'
 
@@ -135,6 +135,7 @@ const navItems = [
   { path: '/', icon: HomeFilled, title: '仪表盘' },
   { path: '/account-management', icon: User, title: '账号管理' },
   { path: '/material-management', icon: Picture, title: '素材管理' },
+  { path: '/personalization', icon: MagicStick, title: '个性化设置' },
   { path: '/publish-center', icon: Upload, title: '视频发布' },
   { path: '/image-publish', icon: Picture, title: '图集发布' },
   { path: '/drafts', icon: Document, title: '草稿箱' },

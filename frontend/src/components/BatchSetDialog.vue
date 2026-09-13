@@ -54,6 +54,9 @@
           placeholder="留空表示立即发布，选择时间则定时发布"
           format="YYYY-MM-DD HH:mm:ss"
           value-format="YYYY-MM-DD HH:mm:ss"
+          :disabled-date="scheduleDisabledDate"
+          :disabled-hours="scheduleDisabledHours"
+          :disabled-minutes="scheduleDisabledMinutes"
           clearable
           style="width: 100%"
         />
@@ -143,6 +146,40 @@ const checkedKeys = ref(new Set())
 
 const checkedCount = computed(() => checkedKeys.value.size)
 
+// ========== 定时发布时间约束：不能早于当前时间 ==========
+function scheduleDisabledDate(date) {
+  if (!date) return false
+  const now = new Date()
+  const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  return date < startOfToday
+}
+
+function _isToday(d) {
+  const now = new Date()
+  return d.getFullYear() === now.getFullYear()
+    && d.getMonth() === now.getMonth()
+    && d.getDate() === now.getDate()
+}
+
+function scheduleDisabledHours() {
+  const raw = formScheduleTime.value
+  if (!raw) return []
+  const selected = new Date(raw)
+  if (isNaN(selected.getTime()) || !_isToday(selected)) return []
+  const now = new Date()
+  return Array.from({ length: now.getHours() }, (_, i) => i)
+}
+
+function scheduleDisabledMinutes(hour) {
+  const raw = formScheduleTime.value
+  if (!raw) return []
+  const selected = new Date(raw)
+  if (isNaN(selected.getTime()) || !_isToday(selected)) return []
+  const now = new Date()
+  if (hour !== now.getHours()) return []
+  return Array.from({ length: now.getMinutes() }, (_, i) => i)
+}
+
 watch(() => props.modelValue, (open) => {
   if (open) {
     formTitle.value = ''
@@ -187,6 +224,11 @@ function removeTag(idx) {
 }
 
 function handleApply(mode = 'full', scope = 'current') {
+  // 兜底校验：手动输入可绕过 disabled-date，过期时间直接拦截
+  if (formScheduleTime.value && new Date(formScheduleTime.value) < new Date()) {
+    ElMessage.warning('定时发布时间早于当前时间，请重新选择')
+    return
+  }
   emit('apply', Array.from(checkedKeys.value), {
     title: formTitle.value,
     description: formDescription.value,
