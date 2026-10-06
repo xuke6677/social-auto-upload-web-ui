@@ -30,7 +30,7 @@ if exist "%PROJECT_ROOT%\dependency\cloakbrowser\chrome.exe" (
     set "CLOAKBROWSER_BINARY_PATH=%PROJECT_ROOT%\dependency\cloakbrowser\chrome.exe"
 )
 :: --- 项目代码管理（git clone / 强制更新到最新）---
-set "REPO_URL=https://github.com/DevilJie/social-auto-upload-web-ui.git"
+set "REPO_URL=https://github.com/xuke6677/social-auto-upload-web-ui.git"
 set "MAIN_BRANCH=master"
 
 if not exist "%BACKEND_DIR%" (
@@ -223,10 +223,10 @@ set "ALL_PROXY="
 echo.
 echo [2/6] 处理端口冲突...
 
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5409 ^| findstr LISTENING 2^>nul') do (
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5509 ^| findstr LISTENING 2^>nul') do (
     taskkill /F /PID %%a >nul 2>&1
 )
-echo   √ 端口 5409 空闲
+echo   √ 端口 5509 空闲
 
 for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5173 ^| findstr LISTENING 2^>nul') do (
     taskkill /F /PID %%a >nul 2>&1
@@ -523,12 +523,12 @@ timeout /t 1 /nobreak >nul
 
 :: 启动后端（使用完整路径避免变量展开问题）
 cd /d "%BACKEND_DIR%"
-set "SAU_PORT=5409"
+set "SAU_PORT=5509"
 start "SAU-Backend" /B cmd /c ""%VENV_DIR%\Scripts\python.exe" app.py > "%BACKEND_LOG%" 2>&1"
 
 :: 等待后端进程启动并获取 PID
 timeout /t 2 /nobreak >nul
-for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5409 ^| findstr LISTENING 2^>nul') do set "BACKEND_PID=%%a"
+for /f "tokens=5" %%a in ('netstat -aon ^| findstr :5509 ^| findstr LISTENING 2^>nul') do set "BACKEND_PID=%%a"
 echo   √ 后端已启动 (PID: !BACKEND_PID!)
 
 :: 启动前端
@@ -543,7 +543,8 @@ echo   √ 前端已启动 (PID: !FRONTEND_PID!)
 :: 启动 MCP
 cd /d "%MCP_DIR%"
 set "TRANSPORT_MODE=%TRANSPORT_MODE%"
-start "SAU-MCP" /B cmd /c "set TRANSPORT_MODE=%TRANSPORT_MODE%&& npm start > "%MCP_LOG%" 2>&1"
+set "BACKEND_URL=http://localhost:5509"
+start "SAU-MCP" /B cmd /c "set TRANSPORT_MODE=%TRANSPORT_MODE%&& set BACKEND_URL=http://localhost:5509&& npm start > "%MCP_LOG%" 2>&1"
 
 :: 等待 MCP 进程启动
 timeout /t 2 /nobreak >nul
@@ -570,7 +571,7 @@ echo.
 echo [6/6] 等待服务就绪...
 
 :: 等待后端（自动检测端口）
-set "BACKEND_PORT=5409"
+set "BACKEND_PORT=5509"
 set /a "COUNT=0"
 :wait_backend
 set /a "COUNT+=1"
