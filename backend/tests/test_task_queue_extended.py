@@ -1,6 +1,7 @@
 """PublishTask 扩展字段测试。"""
 import sys
 import asyncio
+import threading
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
@@ -107,6 +108,39 @@ def test_execute_async_publish_video():
         result = asyncio.run(queue._execute(t))
 
     assert result is True
+
+
+def test_start_waits_for_queue_initialization():
+    """start 返回前 queue/loop 必须就绪，避免首个任务遇到 None.put。"""
+    q = TaskQueue(max_concurrent=1)
+    entered = threading.Event()
+    allow_init = threading.Event()
+    original_run_loop = q._run_loop
+
+    def delayed_run_loop():
+        entered.set()
+        allow_init.wait()
+        original_run_loop()
+
+    q._run_loop = delayed_run_loop
+    starter = threading.Thread(target=q.start)
+    try:
+        with patch('ext_api.task_queue._cleanup_orphaned_tasks'):
+            starter.start()
+            assert entered.wait(timeout=2)
+            assert starter.is_alive()
+            allow_init.set()
+            starter.join(timeout=2)
+        assert not starter.is_alive()
+        assert q.queue is not None
+        assert q._loop is not None
+    finally:
+        allow_init.set()
+        starter.join(timeout=2)
+        if q._loop is not None:
+            q._loop.call_soon_threadsafe(q._loop.stop)
+        if q._thread is not None:
+            q._thread.join(timeout=2)
 
 
 def _make_test_queue():

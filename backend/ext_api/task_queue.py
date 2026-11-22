@@ -290,6 +290,8 @@ class TaskQueue:
         self._loop: asyncio.AbstractEventLoop = None
         self._thread: threading.Thread = None
         self._started = False
+        self._start_lock = threading.Lock()
+        self._ready = threading.Event()
         self._status_callbacks = []  # 状态变更回调
         self._interval_gate: asyncio.Lock | None = None  # 间隔模式的串行闸门
         # 取消支持：running 的 asyncio task 句柄 / 队列中待取消的 id / 已取消集合
@@ -299,15 +301,18 @@ class TaskQueue:
         self._cancel_lock = threading.Lock()
 
     def start(self):
-        """在后台线程中启动事件循环"""
-        if self._started:
-            return
-        # 先清掉上次进程遗留的孤儿任务,避免前端永远显示「排队中」且无法取消
-        _cleanup_orphaned_tasks()
-        self._thread = threading.Thread(target=self._run_loop, daemon=True)
-        self._thread.start()
-        self._started = True
-        logger.info(f"[TaskQueue] 启动，并发数={self.max_concurrent}")
+        """在后台线程中启动事件循环，并等待队列初始化完成。"""
+        with self._start_lock:
+            if not self._started:
+                # 先清掉上次进程遗留的孤儿任务,避免前端永远显示「排队中」且无法取消
+                _cleanup_orphaned_tasks()
+                self._ready.clear()
+                self._thread = threading.Thread(target=self._run_loop, daemon=True)
+                self._thread.start()
+                self._started = True
+                logger.info(f"[TaskQueue] 启动，并发数={self.max_concurrent}")
+        # add_task 在 start 返回后会立即使用 queue/loop，必须等后台线程就绪。
+        self._ready.wait()
 
     def _run_loop(self):
         self._loop = asyncio.new_event_loop()
@@ -316,6 +321,7 @@ class TaskQueue:
         self._interval_gate = asyncio.Lock()
         for i in range(self.max_concurrent):
             self._loop.create_task(self._worker(f"worker-{i}"))
+        self._ready.set()
         self._loop.run_forever()
 
     async def _worker(self, name: str):
